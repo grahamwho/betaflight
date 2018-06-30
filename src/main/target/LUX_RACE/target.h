@@ -27,6 +27,12 @@
 #endif
 
 // Removed to make the firmware fit into flash (in descending order of priority):
+#ifdef LUXV2_RACE
+#define USE_ABSOLUTE_CONTROL
+#else
+#undef USE_ABSOLUTE_CONTROL
+#endif
+
 #undef USE_RTC_TIME
 #undef USE_RX_MSP
 #undef USE_ESC_SENSOR_INFO
