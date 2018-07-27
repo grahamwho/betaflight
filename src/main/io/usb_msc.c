@@ -18,29 +18,25 @@
  * If not, see <http://www.gnu.org/licenses/>.
  */
 
-#pragma once
+#include <stdbool.h>
 
-#ifdef USE_OSD_SLAVE
-#include "common/time.h"
+#include "platform.h"
 
-struct displayPort_s;
+#include "drivers/sdcard.h"
 
-extern bool osdSlaveIsLocked;
+#include "io/flashfs.h"
 
-// init
-void osdSlaveInit(struct displayPort_s *osdDisplayPort);
-bool osdSlaveInitialized(void);
+#if defined(USE_USB_MSC)
 
-// task api
-bool osdSlaveCheck(timeUs_t currentTimeUs, timeDelta_t currentDeltaTimeUs);
-void osdSlaveUpdate(timeUs_t currentTimeUs);
-
-// msp api
-void osdSlaveHeartbeat(void);
-void osdSlaveClearScreen(void);
-void osdSlaveWriteChar(const uint8_t x, const uint8_t y, const uint8_t c);
-void osdSlaveWrite(const uint8_t x, const uint8_t y, const char *s);
-
-void osdSlaveDrawScreen(void);
-
+bool mscCheckFilesystemReady(void)
+{
+    return false
+#if defined(USE_SDCARD)
+        || sdcard_isFunctional()
+#endif
+#if defined(USE_FLASHFS)
+        || flashfsGetSize() > 0
+#endif
+        ;
+}
 #endif

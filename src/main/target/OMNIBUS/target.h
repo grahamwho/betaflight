@@ -25,10 +25,19 @@
 // Removed to make the firmware fit into flash (in descending order of priority):
 
 
+#undef USE_MSP_DISPLAYPORT
+#undef USE_MSP_OVER_TELEMETRY
+
+#undef USE_HUFFMAN
+#undef USE_PINIO
+#undef USE_PINIOBOX
+
 #undef USE_TELEMETRY_HOTT
 #undef USE_TELEMETRY_MAVLINK
 #undef USE_TELEMETRY_LTM
 #undef USE_SERIALRX_XBUS
+#undef USE_SERIALRX_SUMH
+#undef USE_PWM
 
 
 #undef USE_RTC_TIME

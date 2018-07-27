@@ -20,27 +20,4 @@
 
 #pragma once
 
-#ifdef USE_OSD_SLAVE
-#include "common/time.h"
-
-struct displayPort_s;
-
-extern bool osdSlaveIsLocked;
-
-// init
-void osdSlaveInit(struct displayPort_s *osdDisplayPort);
-bool osdSlaveInitialized(void);
-
-// task api
-bool osdSlaveCheck(timeUs_t currentTimeUs, timeDelta_t currentDeltaTimeUs);
-void osdSlaveUpdate(timeUs_t currentTimeUs);
-
-// msp api
-void osdSlaveHeartbeat(void);
-void osdSlaveClearScreen(void);
-void osdSlaveWriteChar(const uint8_t x, const uint8_t y, const uint8_t c);
-void osdSlaveWrite(const uint8_t x, const uint8_t y, const char *s);
-
-void osdSlaveDrawScreen(void);
-
-#endif
+bool mscCheckFilesystemReady(void);
