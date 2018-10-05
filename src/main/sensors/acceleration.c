@@ -347,14 +347,11 @@ bool accInit(uint32_t gyroSamplingInverval)
     acc.dev.mpuDetectionResult = *gyroMpuDetectionResult();
     acc.dev.acc_high_fsr = accelerometerConfig()->acc_high_fsr;
 
-#ifdef USE_DUAL_GYRO
+    acc.dev.accAlign = ACC_1_ALIGN;
+#ifdef ACC_2_ALIGN
     if (gyroConfig()->gyro_to_use == GYRO_CONFIG_USE_GYRO_2) {
         acc.dev.accAlign = ACC_2_ALIGN;
-    } else {
-        acc.dev.accAlign = ACC_1_ALIGN;
     }
-#else
-    acc.dev.accAlign = ALIGN_DEFAULT;
 #endif
 
     if (!accDetect(&acc.dev, accelerometerConfig()->acc_hardware)) {
@@ -362,6 +359,7 @@ bool accInit(uint32_t gyroSamplingInverval)
     }
     acc.dev.acc_1G = 256; // set default
     acc.dev.initFn(&acc.dev); // driver initialisation
+    acc.dev.acc_1G_rec = 1.0f / acc.dev.acc_1G;
     // set the acc sampling interval according to the gyro sampling interval
     switch (gyroSamplingInverval) {  // Switch statement kept in place to change acc sampling interval in the future
     case 500:
@@ -527,7 +525,7 @@ void accUpdate(timeUs_t currentTimeUs, rollAndPitchTrims_t *rollAndPitchTrims)
         performAcclerationCalibration(rollAndPitchTrims);
     }
 
-    if (feature(FEATURE_INFLIGHT_ACC_CAL)) {
+    if (featureIsEnabled(FEATURE_INFLIGHT_ACC_CAL)) {
         performInflightAccelerationCalibration(rollAndPitchTrims);
     }
 

@@ -74,6 +74,8 @@ extern "C" {
 
     uint32_t millis(void);
     int minTimeout = 180;
+
+    void rcdeviceSend5KeyOSDCableSimualtionEvent(rcdeviceCamSimulationKeyEvent_e key);
 }
 
 #define MAX_RESPONSES_COUNT 10
@@ -845,7 +847,7 @@ extern "C" {
         sbufWriteU8(dst, (uint8_t)val);
     }
 
-    bool feature(uint32_t) { return false; }
+    bool featureIsEnabled(uint32_t) { return false; }
 
     void serialWriteBuf(serialPort_t *instance, const uint8_t *data, int count) 
     { 

@@ -318,7 +318,7 @@ static void smartPortSendPackage(uint16_t id, uint32_t val)
 }
 
 static bool reportExtendedEscSensors(void) {
-    return feature(FEATURE_ESC_SENSOR) && telemetryConfig()->smartport_use_extra_sensors;
+    return featureIsEnabled(FEATURE_ESC_SENSOR) && telemetryConfig()->smartport_use_extra_sensors;
 }
 
 #define ADD_SENSOR(dataId) frSkyDataIdTableInfo.table[frSkyDataIdTableInfo.index++] = dataId
@@ -365,7 +365,7 @@ static void initSmartPortSensors(void)
     }
 
 #ifdef USE_GPS
-    if (feature(FEATURE_GPS)) {
+    if (featureIsEnabled(FEATURE_GPS)) {
         ADD_SENSOR(FSSP_DATAID_SPEED);
         ADD_SENSOR(FSSP_DATAID_LATLONG);
         ADD_SENSOR(FSSP_DATAID_LATLONG); // twice (one for lat, one for long)
@@ -635,7 +635,7 @@ void processSmartPortTelemetry(smartPortPayload_t *payload, volatile bool *clear
                 break;
 #endif
             case FSSP_DATAID_ALTITUDE   :
-                smartPortSendPackage(id, getEstimatedAltitude()); // unknown given unit, requested 100 = 1 meter
+                smartPortSendPackage(id, getEstimatedAltitudeCm()); // unknown given unit, requested 100 = 1 meter
                 *clearToSend = false;
                 break;
             case FSSP_DATAID_FUEL       :
@@ -651,15 +651,15 @@ void processSmartPortTelemetry(smartPortPayload_t *payload, volatile bool *clear
                 *clearToSend = false;
                 break;
             case FSSP_DATAID_ACCX       :
-                smartPortSendPackage(id, lrintf(100 * acc.accADC[X] / acc.dev.acc_1G)); // Multiply by 100 to show as x.xx g on Taranis
+                smartPortSendPackage(id, lrintf(100 * acc.accADC[X] * acc.dev.acc_1G_rec)); // Multiply by 100 to show as x.xx g on Taranis
                 *clearToSend = false;
                 break;
             case FSSP_DATAID_ACCY       :
-                smartPortSendPackage(id, lrintf(100 * acc.accADC[Y] / acc.dev.acc_1G));
+                smartPortSendPackage(id, lrintf(100 * acc.accADC[Y] * acc.dev.acc_1G_rec));
                 *clearToSend = false;
                 break;
             case FSSP_DATAID_ACCZ       :
-                smartPortSendPackage(id, lrintf(100 * acc.accADC[Z] / acc.dev.acc_1G));
+                smartPortSendPackage(id, lrintf(100 * acc.accADC[Z] * acc.dev.acc_1G_rec));
                 *clearToSend = false;
                 break;
             case FSSP_DATAID_T1         :
@@ -719,7 +719,7 @@ void processSmartPortTelemetry(smartPortPayload_t *payload, volatile bool *clear
                     // provide GPS lock status
                     smartPortSendPackage(id, (STATE(GPS_FIX) ? 1000 : 0) + (STATE(GPS_FIX_HOME) ? 2000 : 0) + gpsSol.numSat);
                     *clearToSend = false;
-                } else if (feature(FEATURE_GPS)) {
+                } else if (featureIsEnabled(FEATURE_GPS)) {
                     smartPortSendPackage(id, 0);
                     *clearToSend = false;
                 } else
@@ -794,7 +794,7 @@ void processSmartPortTelemetry(smartPortPayload_t *payload, volatile bool *clear
                 break;
             case FSSP_DATAID_GPS_ALT    :
                 if (STATE(GPS_FIX)) {
-                    smartPortSendPackage(id, gpsSol.llh.alt * 100); // given in 0.1m , requested in 10 = 1m (should be in mm, probably a bug in opentx, tested on 2.0.1.7)
+                    smartPortSendPackage(id, gpsSol.llh.altCm * 10); // given in 0.01m , requested in 10 = 1m (should be in mm, probably a bug in opentx, tested on 2.0.1.7)
                     *clearToSend = false;
                 }
                 break;
@@ -829,7 +829,7 @@ void handleSmartPortTelemetry(void)
             payload = smartPortDataReceive(c, &clearToSend, serialCheckQueueEmpty, true);
         }
 
-        processSmartPortTelemetry(payload, &clearToSend, &requestTimeout);
+            processSmartPortTelemetry(payload, &clearToSend, &requestTimeout);
     }
 }
 #endif

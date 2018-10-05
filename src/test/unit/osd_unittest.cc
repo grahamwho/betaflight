@@ -26,6 +26,7 @@ extern "C" {
     #include "build/debug.h"
 
     #include "blackbox/blackbox.h"
+    #include "blackbox/blackbox_io.h"
 
     #include "pg/pg.h"
     #include "pg/pg_ids.h"
@@ -37,7 +38,7 @@ extern "C" {
     #include "drivers/serial.h"
 
     #include "fc/config.h"
-    #include "fc/fc_core.h"
+    #include "fc/core.h"
     #include "fc/rc_controls.h"
     #include "fc/rc_modes.h"
     #include "fc/runtime_config.h"
@@ -303,6 +304,7 @@ TEST(OsdTest, TestStatsImperial)
     osdStatSetState(OSD_STAT_RTC_DATE_TIME, true);
     osdStatSetState(OSD_STAT_MAX_DISTANCE, true);
     osdStatSetState(OSD_STAT_BLACKBOX_NUMBER, false);
+    osdStatSetState(OSD_STAT_MAX_G_FORCE, false);
 
     // and
     // using imperial unit system
@@ -1004,7 +1006,7 @@ extern "C" {
         return simulationMahDrawn;
     }
 
-    int32_t getEstimatedAltitude() {
+    int32_t getEstimatedAltitudeCm() {
         return simulationAltitude;
     }
 
@@ -1014,6 +1016,14 @@ extern "C" {
 
     unsigned int blackboxGetLogNumber() {
         return 0;
+    }
+
+    bool isBlackboxDeviceWorking() {
+        return true;
+    }
+
+    bool isBlackboxDeviceFull() {
+        return false;
     }
 
     bool isSerialTransmitBufferEmpty(const serialPort_t *) {
@@ -1037,4 +1047,6 @@ extern "C" {
     }
 
     bool pidOsdAntiGravityActive(void) { return false; }
+
+    bool failsafeIsActive(void) { return false; }
 }

@@ -22,6 +22,7 @@
 
 #define TARGET_BOARD_IDENTIFIER "CJM1" // CJMCU
 #define USE_HARDWARE_REVISION_DETECTION
+#define USE_TARGET_CONFIG
 #define TARGET_BUS_INIT
 
 #define LED0_PIN                PC14
@@ -66,15 +67,13 @@
 // Nordic Semiconductor uses 'CSN', STM uses 'NSS'
 #define RX_CE_PIN               PA4
 #define RX_NSS_PIN              PA11
-#define RX_SCK_PIN              PA5
-#define RX_MISO_PIN             PA6
-#define RX_MOSI_PIN             PA7
 #define RX_IRQ_PIN              PA8
 // CJMCU has NSS on PA11, rather than the standard PA4
 #define SPI1_NSS_PIN            RX_NSS_PIN
-#define SPI1_SCK_PIN            RX_SCK_PIN
-#define SPI1_MISO_PIN           RX_MISO_PIN
-#define SPI1_MOSI_PIN           RX_MOSI_PIN
+
+#define SPI1_SCK_PIN            PA5
+#define SPI1_MISO_PIN           PA6
+#define SPI1_MOSI_PIN           PA7
 
 #define USE_RX_NRF24
 #define USE_RX_CX10

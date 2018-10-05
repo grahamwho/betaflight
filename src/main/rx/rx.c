@@ -248,7 +248,7 @@ void rxInit(void)
         rcInvalidPulsPeriod[i] = millis() + MAX_INVALID_PULS_TIME;
     }
 
-    rcData[THROTTLE] = (feature(FEATURE_3D)) ? rxConfig()->midrc : rxConfig()->rx_min_usec;
+    rcData[THROTTLE] = (featureIsEnabled(FEATURE_3D)) ? rxConfig()->midrc : rxConfig()->rx_min_usec;
 
     // Initialize ARM switch to OFF position when arming via switch is defined
     // TODO - move to rc_mode.c
@@ -268,10 +268,9 @@ void rxInit(void)
     }
 
 #ifdef USE_SERIAL_RX
-    if (feature(FEATURE_RX_SERIAL)) {
+    if (featureIsEnabled(FEATURE_RX_SERIAL)) {
         const bool enabled = serialRxInit(rxConfig(), &rxRuntimeConfig);
         if (!enabled) {
-            featureClear(FEATURE_RX_SERIAL);
             rxRuntimeConfig.rcReadRawFn = nullReadRawRC;
             rxRuntimeConfig.rcFrameStatusFn = nullFrameStatus;
         }
@@ -279,17 +278,16 @@ void rxInit(void)
 #endif
 
 #ifdef USE_RX_MSP
-    if (feature(FEATURE_RX_MSP)) {
+    if (featureIsEnabled(FEATURE_RX_MSP)) {
         rxMspInit(rxConfig(), &rxRuntimeConfig);
         needRxSignalMaxDelayUs = DELAY_5_HZ;
     }
 #endif
 
 #ifdef USE_RX_SPI
-    if (feature(FEATURE_RX_SPI)) {
+    if (featureIsEnabled(FEATURE_RX_SPI)) {
         const bool enabled = rxSpiInit(rxSpiConfig(), &rxRuntimeConfig);
         if (!enabled) {
-            featureClear(FEATURE_RX_SPI);
             rxRuntimeConfig.rcReadRawFn = nullReadRawRC;
             rxRuntimeConfig.rcFrameStatusFn = nullFrameStatus;
         }
@@ -297,13 +295,13 @@ void rxInit(void)
 #endif
 
 #if defined(USE_PWM) || defined(USE_PPM)
-    if (feature(FEATURE_RX_PPM) || feature(FEATURE_RX_PARALLEL_PWM)) {
+    if (featureIsEnabled(FEATURE_RX_PPM | FEATURE_RX_PARALLEL_PWM)) {
         rxPwmInit(rxConfig(), &rxRuntimeConfig);
     }
 #endif
 
 #if defined(USE_ADC)
-    if (feature(FEATURE_RSSI_ADC)) {
+    if (featureIsEnabled(FEATURE_RSSI_ADC)) {
         rssiSource = RSSI_SOURCE_ADC;
     } else
 #endif
@@ -324,18 +322,26 @@ bool rxAreFlightChannelsValid(void)
     return rxFlightChannelsValid;
 }
 
-void suspendRxSignal(void)
+void suspendRxPwmPpmSignal(void)
 {
-    suspendRxSignalUntil = micros() + SKIP_RC_ON_SUSPEND_PERIOD;
-    skipRxSamples = SKIP_RC_SAMPLES_ON_RESUME;
-    failsafeOnRxSuspend(SKIP_RC_ON_SUSPEND_PERIOD);
+#if defined(USE_PWM) || defined(USE_PPM)
+    if (featureIsEnabled(FEATURE_RX_PARALLEL_PWM | FEATURE_RX_PPM)) {
+        suspendRxSignalUntil = micros() + SKIP_RC_ON_SUSPEND_PERIOD;
+        skipRxSamples = SKIP_RC_SAMPLES_ON_RESUME;
+        failsafeOnRxSuspend(SKIP_RC_ON_SUSPEND_PERIOD);
+    }
+#endif
 }
 
-void resumeRxSignal(void)
+void resumeRxPwmPpmSignal(void)
 {
-    suspendRxSignalUntil = micros();
-    skipRxSamples = SKIP_RC_SAMPLES_ON_RESUME;
-    failsafeOnRxResume();
+#if defined(USE_PWM) || defined(USE_PPM)
+    if (featureIsEnabled(FEATURE_RX_PARALLEL_PWM | FEATURE_RX_PPM)) {
+        suspendRxSignalUntil = micros();
+        skipRxSamples = SKIP_RC_SAMPLES_ON_RESUME;
+        failsafeOnRxResume();
+    }
+#endif
 }
 
 bool rxUpdateCheck(timeUs_t currentTimeUs, timeDelta_t currentDeltaTime)
@@ -346,14 +352,14 @@ bool rxUpdateCheck(timeUs_t currentTimeUs, timeDelta_t currentDeltaTime)
     bool useDataDrivenProcessing = true;
 
 #if defined(USE_PWM) || defined(USE_PPM)
-    if (feature(FEATURE_RX_PPM)) {
+    if (featureIsEnabled(FEATURE_RX_PPM)) {
         if (isPPMDataBeingReceived()) {
             signalReceived = true;
             rxIsInFailsafeMode = false;
             needRxSignalBefore = currentTimeUs + needRxSignalMaxDelayUs;
             resetPPMDataReceivedState();
         }
-    } else if (feature(FEATURE_RX_PARALLEL_PWM)) {
+    } else if (featureIsEnabled(FEATURE_RX_PARALLEL_PWM)) {
         if (isPWMDataBeingReceived()) {
             signalReceived = true;
             rxIsInFailsafeMode = false;
@@ -399,6 +405,7 @@ bool rxUpdateCheck(timeUs_t currentTimeUs, timeDelta_t currentDeltaTime)
     return rxDataProcessingRequired || auxiliaryProcessingRequired; // data driven or 50Hz
 }
 
+#if defined(USE_PWM) || defined(USE_PPM)
 static uint16_t calculateChannelMovingAverage(uint8_t chan, uint16_t sample)
 {
     static int16_t rcSamples[MAX_SUPPORTED_RX_PARALLEL_PWM_OR_PPM_CHANNEL_COUNT][PPM_AND_PWM_SAMPLE_COUNT];
@@ -424,6 +431,7 @@ static uint16_t calculateChannelMovingAverage(uint8_t chan, uint16_t sample)
     }
     return rcDataMean[chan] / PPM_AND_PWM_SAMPLE_COUNT;
 }
+#endif
 
 static uint16_t getRxfailValue(uint8_t channel)
 {
@@ -437,7 +445,7 @@ static uint16_t getRxfailValue(uint8_t channel)
         case YAW:
             return rxConfig()->midrc;
         case THROTTLE:
-            if (feature(FEATURE_3D))
+            if (featureIsEnabled(FEATURE_3D))
                 return rxConfig()->midrc;
             else
                 return rxConfig()->rx_min_usec;
@@ -512,10 +520,13 @@ static void detectAndApplySignalLossBehaviour(void)
                 }
             }
         }
-        if (feature(FEATURE_RX_PARALLEL_PWM | FEATURE_RX_PPM)) {
+#if defined(USE_PWM) || defined(USE_PPM)
+        if (featureIsEnabled(FEATURE_RX_PARALLEL_PWM | FEATURE_RX_PPM)) {
             // smooth output for PWM and PPM
             rcData[channel] = calculateChannelMovingAverage(channel, sample);
-        } else {
+        } else
+#endif
+        {
             rcData[channel] = sample;
         }
     }
@@ -546,7 +557,7 @@ bool calculateRxChannelsAndUpdateFailsafe(timeUs_t currentTimeUs)
     rxNextUpdateAtUs = currentTimeUs + DELAY_33_HZ;
 
     // only proceed when no more samples to skip and suspend period is over
-    if (skipRxSamples) {
+    if (skipRxSamples || currentTimeUs <= suspendRxSignalUntil) {
         if (currentTimeUs > suspendRxSignalUntil) {
             skipRxSamples--;
         }
@@ -685,4 +696,9 @@ uint8_t getRssiPercent(void)
 uint16_t rxGetRefreshRate(void)
 {
     return rxRuntimeConfig.rxRefreshRate;
+}
+
+bool isRssiConfigured(void)
+{
+    return rssiSource != RSSI_SOURCE_NONE;
 }

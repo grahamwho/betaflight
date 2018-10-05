@@ -53,7 +53,7 @@
 
 #include "fc/config.h"
 #include "fc/controlrate_profile.h"
-#include "fc/fc_rc.h"
+#include "fc/rc.h"
 #include "fc/rc_controls.h"
 #include "fc/rc_modes.h"
 #include "fc/runtime_config.h"
@@ -448,7 +448,7 @@ static bool testBlackboxConditionUncached(FlightLogFieldCondition condition)
 #endif
 
     case FLIGHT_LOG_FIELD_CONDITION_RSSI:
-        return rxConfig()->rssi_channel > 0 || feature(FEATURE_RSSI_ADC);
+        return isRssiConfigured();
 
     case FLIGHT_LOG_FIELD_CONDITION_NOT_LOGGING_EVERY_FRAME:
         return blackboxConfig()->p_ratio != 1;
@@ -977,7 +977,7 @@ static void writeGPSFrame(timeUs_t currentTimeUs)
     blackboxWriteUnsignedVB(gpsSol.numSat);
     blackboxWriteSignedVB(gpsSol.llh.lat - gpsHistory.GPS_home[LAT]);
     blackboxWriteSignedVB(gpsSol.llh.lon - gpsHistory.GPS_home[LON]);
-    blackboxWriteUnsignedVB(gpsSol.llh.alt);
+    blackboxWriteUnsignedVB(gpsSol.llh.altCm / 10); // was originally designed to transport meters in int16, but +-3276.7m is a good compromise
     blackboxWriteUnsignedVB(gpsSol.groundSpeed);
     blackboxWriteUnsignedVB(gpsSol.groundCourse);
 
@@ -1254,6 +1254,9 @@ static bool blackboxWriteSysinfo(void)
         BLACKBOX_PRINT_HEADER_LINE("rates", "%d,%d,%d",                     currentControlRateProfile->rates[ROLL],
                                                                             currentControlRateProfile->rates[PITCH],
                                                                             currentControlRateProfile->rates[YAW]);
+        BLACKBOX_PRINT_HEADER_LINE("rate_limits", "%d,%d,%d",               currentControlRateProfile->rate_limit[ROLL],
+                                                                            currentControlRateProfile->rate_limit[PITCH],
+                                                                            currentControlRateProfile->rate_limit[YAW]);
         BLACKBOX_PRINT_HEADER_LINE("rollPID", "%d,%d,%d",                   currentPidProfile->pid[PID_ROLL].P,
                                                                             currentPidProfile->pid[PID_ROLL].I,
                                                                             currentPidProfile->pid[PID_ROLL].D);
@@ -1315,6 +1318,7 @@ static bool blackboxWriteSysinfo(void)
         BLACKBOX_PRINT_HEADER_LINE("gyro_cal_on_first_arm", "%d",           armingConfig()->gyro_cal_on_first_arm);
         BLACKBOX_PRINT_HEADER_LINE("rc_interpolation", "%d",                rxConfig()->rcInterpolation);
         BLACKBOX_PRINT_HEADER_LINE("rc_interpolation_interval", "%d",       rxConfig()->rcInterpolationInterval);
+        BLACKBOX_PRINT_HEADER_LINE("rc_interpolation_channels", "%d",       rxConfig()->rcInterpolationChannels);
         BLACKBOX_PRINT_HEADER_LINE("airmode_activate_throttle", "%d",       rxConfig()->airModeActivateThreshold);
         BLACKBOX_PRINT_HEADER_LINE("serialrx_provider", "%d",               rxConfig()->serialrx_provider);
         BLACKBOX_PRINT_HEADER_LINE("use_unsynced_pwm", "%d",                motorConfig()->dev.useUnsyncedPwm);
@@ -1487,7 +1491,7 @@ STATIC_UNIT_TESTED void blackboxLogIteration(timeUs_t currentTimeUs)
             writeInterframe();
         }
 #ifdef USE_GPS
-        if (feature(FEATURE_GPS)) {
+        if (featureIsEnabled(FEATURE_GPS)) {
             if (blackboxShouldLogGpsHomeFrame()) {
                 writeGPSHomeFrame();
                 writeGPSFrame(currentTimeUs);
@@ -1553,7 +1557,7 @@ void blackboxUpdate(timeUs_t currentTimeUs)
         if (!sendFieldDefinition('I', 'P', blackboxMainFields, blackboxMainFields + 1, ARRAYLEN(blackboxMainFields),
                 &blackboxMainFields[0].condition, &blackboxMainFields[1].condition)) {
 #ifdef USE_GPS
-            if (feature(FEATURE_GPS)) {
+            if (featureIsEnabled(FEATURE_GPS)) {
                 blackboxSetState(BLACKBOX_STATE_SEND_GPS_H_HEADER);
             } else
 #endif

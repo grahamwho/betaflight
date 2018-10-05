@@ -206,10 +206,11 @@ CFLAGS     += $(ARCH_FLAGS) \
               $(addprefix -D,$(OPTIONS)) \
               $(addprefix -I,$(INCLUDE_DIRS)) \
               $(DEBUG_FLAGS) \
-              -std=gnu99 \
+              -std=gnu11 \
               -Wall -Wextra -Wunsafe-loop-optimizations -Wdouble-promotion \
               -ffunction-sections \
               -fdata-sections \
+              -fno-common \
               -pedantic \
               $(DEVICE_FLAGS) \
               -D_GNU_SOURCE \

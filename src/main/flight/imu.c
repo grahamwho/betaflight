@@ -111,14 +111,12 @@ quaternion offset = QUATERNION_INITIALIZE;
 // absolute angle inclination in multiple of 0.1 degree    180 deg = 1800
 attitudeEulerAngles_t attitude = EULER_INITIALIZE;
 
-PG_REGISTER_WITH_RESET_TEMPLATE(imuConfig_t, imuConfig, PG_IMU_CONFIG, 0);
+PG_REGISTER_WITH_RESET_TEMPLATE(imuConfig_t, imuConfig, PG_IMU_CONFIG, 1);
 
 PG_RESET_TEMPLATE(imuConfig_t, imuConfig,
     .dcm_kp = 2500,                // 1.0 * 10000
     .dcm_ki = 0,                   // 0.003 * 10000
     .small_angle = 25,
-    .accDeadband = {.xy = 40, .z= 40},
-    .acc_unarmedcal = 1
 );
 
 STATIC_UNIT_TESTED void imuComputeRotationMatrix(void){
@@ -159,7 +157,6 @@ void imuConfigure(uint16_t throttle_correction_angle, uint8_t throttle_correctio
 {
     imuRuntimeConfig.dcm_kp = imuConfig()->dcm_kp / 10000.0f;
     imuRuntimeConfig.dcm_ki = imuConfig()->dcm_ki / 10000.0f;
-    imuRuntimeConfig.acc_unarmedcal = imuConfig()->acc_unarmedcal;
     imuRuntimeConfig.small_angle = imuConfig()->small_angle;
 
     fc_acc = calculateAccZLowPassFilterRCTimeConstant(5.0f); // Set to fix value
@@ -171,7 +168,7 @@ void imuConfigure(uint16_t throttle_correction_angle, uint8_t throttle_correctio
 void imuInit(void)
 {
     smallAngleCosZ = cos_approx(degreesToRadians(imuRuntimeConfig.small_angle));
-    accVelScale = 9.80665f / acc.dev.acc_1G / 10000.0f;
+    accVelScale = 9.80665f * acc.dev.acc_1G_rec / 10000.0f;
 
 #ifdef USE_GPS
     canUseGPSHeading = true;
@@ -355,16 +352,16 @@ STATIC_UNIT_TESTED void imuUpdateEulerAngles(void)
 
 static bool imuIsAccelerometerHealthy(float *accAverage)
 {
-    float accMagnitude = 0;
+    float accMagnitudeSq = 0;
     for (int axis = 0; axis < 3; axis++) {
         const float a = accAverage[axis];
-        accMagnitude += a * a;
+        accMagnitudeSq += a * a;
     }
 
-    accMagnitude = accMagnitude * 100 / (sq((int32_t)acc.dev.acc_1G));
+    accMagnitudeSq = accMagnitudeSq * sq(acc.dev.acc_1G_rec);
 
-    // Accept accel readings only in range 0.90g - 1.10g
-    return (81 < accMagnitude) && (accMagnitude < 121);
+    // Accept accel readings only in range 0.9g - 1.1g
+    return (0.81f < accMagnitudeSq) && (accMagnitudeSq < 1.21f);
 }
 
 // Calculate the dcmKpGain to use. When armed, the gain is imuRuntimeConfig.dcm_kp * 1.0 scaling.

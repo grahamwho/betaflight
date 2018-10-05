@@ -19,6 +19,7 @@
  */
 
 #pragma once
+#define TARGET_VALIDATECONFIG
 
 #define TARGET_BOARD_IDENTIFIER "DLF7"
 #define USBD_PRODUCT_STRING  "DALRCF722DUAL"
@@ -32,9 +33,9 @@
 
 #define USE_DUAL_GYRO
 #define USE_EXTI
+#define USE_GYRO_EXTI
 #define GYRO_1_EXTI_PIN         PB10
 #define GYRO_2_EXTI_PIN         PC4
-#define MPU_INT_EXTI
 
 #define GYRO_1_CS_PIN                       PB0   
 #define GYRO_1_SPI_INSTANCE                 SPI1
@@ -69,6 +70,7 @@
 
 #define USE_MAG
 #define USE_MAG_HMC5883
+#define USE_MAG_LIS3MDL
 
 #define USE_VCP
 #define USE_UART1

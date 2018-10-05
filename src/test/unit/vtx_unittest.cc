@@ -27,7 +27,7 @@ extern "C" {
     #include "pg/rx.h"
     #include "fc/config.h"
     #include "fc/controlrate_profile.h"
-    #include "fc/fc_core.h"
+    #include "fc/core.h"
     #include "fc/rc_controls.h"
     #include "fc/rc_modes.h"
     #include "fc/runtime_config.h"
@@ -115,7 +115,7 @@ extern "C" {
     uint32_t millis(void) { return micros() / 1000; }
     bool rxIsReceivingSignal(void) { return simulationHaveRx; }
 
-    bool feature(uint32_t f) { return simulationFeatureFlags & f; }
+    bool featureIsEnabled(uint32_t f) { return simulationFeatureFlags & f; }
     void warningLedFlash(void) {}
     void warningLedDisable(void) {}
     void warningLedUpdate(void) {}
@@ -145,7 +145,7 @@ extern "C" {
     void failsafeStartMonitoring(void) {}
     void failsafeUpdateState(void) {}
     bool failsafeIsActive(void) { return false; }
-    void pidResetITerm(void) {}
+    void pidResetIterm(void) {}
     void updateAdjustmentStates(void) {}
     void processRcAdjustments(controlRateConfig_t *) {}
     void updateGpsWaypointsAndMode(void) {}
