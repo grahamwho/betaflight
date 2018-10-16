@@ -139,6 +139,8 @@ typedef struct statistic_s {
     int32_t max_altitude;
     int16_t max_distance;
     float max_g_force;
+    int16_t max_esc_temp;
+    int32_t max_esc_rpm;
 } statistic_t;
 
 static statistic_t stats;
@@ -627,6 +629,8 @@ static bool osdDrawSingleElement(uint8_t item)
                 strcpy(buff, "!FS!");
             } else if (FLIGHT_MODE(GPS_RESCUE_MODE)) {
                 strcpy(buff, "RESC");
+            } else if (FLIGHT_MODE(HEADFREE_MODE)) {
+                strcpy(buff, "HEAD");
             } else if (FLIGHT_MODE(ANGLE_MODE)) {
                 strcpy(buff, "STAB");
             } else if (FLIGHT_MODE(HORIZON_MODE)) {
@@ -770,10 +774,47 @@ static bool osdDrawSingleElement(uint8_t item)
             STATIC_ASSERT(OSD_FORMAT_MESSAGE_BUFFER_SIZE <= sizeof(buff), osd_warnings_size_exceeds_buffer_size);
 
             const batteryState_e batteryState = getBatteryState();
+            const timeUs_t currentTimeUs = micros();
+
+            static timeUs_t armingDisabledUpdateTimeUs;
+            static unsigned armingDisabledDisplayIndex;
+
+            // Cycle through the arming disabled reasons
+            if (osdWarnGetState(OSD_WARNING_ARMING_DISABLE)) {
+                if (IS_RC_MODE_ACTIVE(BOXARM) && isArmingDisabled()) {
+                    const armingDisableFlags_e armSwitchOnlyFlag = 1 << (ARMING_DISABLE_FLAGS_COUNT - 1);
+                    armingDisableFlags_e flags = getArmingDisableFlags();
+
+                    // Remove the ARMSWITCH flag unless it's the only one
+                    if ((flags & armSwitchOnlyFlag) && (flags != armSwitchOnlyFlag)) {
+                        flags -= armSwitchOnlyFlag;
+                    }
+
+                    // Rotate to the next arming disabled reason after a 0.5 second time delay
+                    // or if the current flag is no longer set
+                    if ((currentTimeUs - armingDisabledUpdateTimeUs > 5e5) || !(flags & (1 << armingDisabledDisplayIndex))) {
+                        if (armingDisabledUpdateTimeUs == 0) {
+                            armingDisabledDisplayIndex = ARMING_DISABLE_FLAGS_COUNT - 1;
+                        }
+                        armingDisabledUpdateTimeUs = currentTimeUs;
+
+                        do {
+                            if (++armingDisabledDisplayIndex >= ARMING_DISABLE_FLAGS_COUNT) {
+                                armingDisabledDisplayIndex = 0;
+                            }
+                        } while (!(flags & (1 << armingDisabledDisplayIndex)));
+                    }
+
+                    osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, armingDisableFlagNames[armingDisabledDisplayIndex]);
+                    break;
+                } else {
+                    armingDisabledUpdateTimeUs = 0;
+                }
+            }
 
 #ifdef USE_DSHOT
             if (isTryingToArm() && !ARMING_FLAG(ARMED)) {
-                int armingDelayTime = (getLastDshotBeaconCommandTimeUs() + DSHOT_BEACON_GUARD_DELAY_US - micros()) / 1e5;
+                int armingDelayTime = (getLastDshotBeaconCommandTimeUs() + DSHOT_BEACON_GUARD_DELAY_US - currentTimeUs) / 1e5;
                 if (armingDelayTime < 0) {
                     armingDelayTime = 0;
                 }
@@ -794,6 +835,12 @@ static bool osdDrawSingleElement(uint8_t item)
 
             if (osdWarnGetState(OSD_WARNING_BATTERY_CRITICAL) && batteryState == BATTERY_CRITICAL) {
                 osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, " LAND NOW");
+                break;
+            }
+
+            // Show warning if in HEADFREE flight mode
+            if (FLIGHT_MODE(HEADFREE_MODE)) {
+                osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, "HEADFREE");
                 break;
             }
 
@@ -863,18 +910,6 @@ static bool osdDrawSingleElement(uint8_t item)
             // Warn when in flip over after crash mode
             if (osdWarnGetState(OSD_WARNING_CRASH_FLIP) && isFlipOverAfterCrashMode()) {
                 osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, "CRASH FLIP");
-                break;
-            }
-
-            // Show most severe reason for arming being disabled
-            if (osdWarnGetState(OSD_WARNING_ARMING_DISABLE) && IS_RC_MODE_ACTIVE(BOXARM) && isArmingDisabled()) {
-                const armingDisableFlags_e flags = getArmingDisableFlags();
-                for (int i = 0; i < ARMING_DISABLE_FLAGS_COUNT; i++) {
-                    if (flags & (1 << i)) {
-                        osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, armingDisableFlagNames[i]);
-                        break;
-                    }
-                }
                 break;
             }
 
@@ -1293,6 +1328,8 @@ static void osdResetStats(void)
     stats.max_distance = 0;
     stats.armed_time   = 0;
     stats.max_g_force  = 0;
+    stats.max_esc_temp = 0;
+    stats.max_esc_rpm  = 0;
 }
 
 static void osdUpdateStats(void)
@@ -1342,6 +1379,18 @@ static void osdUpdateStats(void)
 
         if (stats.max_distance < GPS_distanceToHome) {
             stats.max_distance = GPS_distanceToHome;
+        }
+    }
+#endif
+#ifdef USE_ESC_SENSOR
+    if (featureIsEnabled(FEATURE_ESC_SENSOR)) {
+        value = (escDataCombined->temperature * 10) / 10;
+        if (stats.max_esc_temp < value) {
+            stats.max_esc_temp = value;
+        }
+        value = calcEscRpm(escDataCombined->rpm);
+        if (stats.max_esc_rpm < value) {
+            stats.max_esc_rpm = value;
         }
     }
 #endif
@@ -1505,6 +1554,16 @@ static void osdShowStats(uint16_t endBatteryVoltage)
     if (osdStatGetState(OSD_STAT_MAX_G_FORCE)) {
         tfp_sprintf(buff, "%01d.%01dG", (int)stats.max_g_force, (int)(stats.max_g_force * 10) % 10);
         osdDisplayStatisticLabel(top++, "MAX G-FORCE", buff);
+    }
+
+    if (osdStatGetState(OSD_STAT_MAX_ESC_TEMP)) {
+        tfp_sprintf(buff, "%3d%c", osdConvertTemperatureToSelectedUnit(stats.max_esc_temp * 10) / 10, osdGetTemperatureSymbolForSelectedUnit());
+        osdDisplayStatisticLabel(top++, "MAX ESC TEMP", buff);
+    }
+
+    if (osdStatGetState(OSD_STAT_MAX_ESC_RPM)) {
+        itoa(stats.max_esc_rpm, buff, 10);
+        osdDisplayStatisticLabel(top++, "MAX ESC RPM", buff);
     }
 
 }

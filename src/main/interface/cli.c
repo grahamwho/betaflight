@@ -141,6 +141,7 @@ extern uint8_t __config_end;
 #include "rx/spektrum.h"
 #include "rx/cc2500_frsky_common.h"
 #include "rx/cc2500_frsky_x.h"
+#include "rx/cc2500_common.h"
 
 #include "scheduler/scheduler.h"
 
@@ -1999,7 +2000,7 @@ static void cliSdInfo(char *cmdline)
         return;
     }
 
-    if (!sdcard_isInitialized()) {
+    if (!sdcard_isFunctional() || !sdcard_isInitialized()) {
         cliPrintLine("Startup failed");
         return;
     }
@@ -2560,17 +2561,18 @@ static void cliBeeper(char *cmdline)
 }
 #endif
 
-#ifdef USE_RX_FRSKY_SPI
-void cliFrSkyBind(char *cmdline){
+#ifdef USE_RX_SPI
+void cliRxBind(char *cmdline){
     UNUSED(cmdline);
     switch (rxSpiConfig()->rx_spi_protocol) {
+#ifdef USE_RX_CC2500_BIND
     case RX_SPI_FRSKY_D:
     case RX_SPI_FRSKY_X:
-        frSkySpiBind();
-
+    case RX_SPI_SFHSS:
+        cc2500SpiBind();
         cliPrint("Binding...");
-
         break;
+#endif
     default:
         cliPrint("Not supported.");
 
@@ -3773,8 +3775,10 @@ const cliResourceValue_t resourceTable[] = {
 #ifdef USE_LED_STRIP
     DEFS( OWNER_LED_STRIP,     PG_LED_STRIP_CONFIG, ledStripConfig_t, ioTag ),
 #endif
+#ifdef USE_UART
     DEFA( OWNER_SERIAL_TX,     PG_SERIAL_PIN_CONFIG, serialPinConfig_t, ioTagTx[0], SERIAL_PORT_MAX_INDEX ),
     DEFA( OWNER_SERIAL_RX,     PG_SERIAL_PIN_CONFIG, serialPinConfig_t, ioTagRx[0], SERIAL_PORT_MAX_INDEX ),
+#endif
 #ifdef USE_INVERTER
     DEFA( OWNER_INVERTER,      PG_SERIAL_PIN_CONFIG, serialPinConfig_t, ioTagInverter[0], SERIAL_PORT_MAX_INDEX ),
 #endif
@@ -4469,8 +4473,8 @@ const clicmd_t cmdTable[] = {
     CLI_COMMAND_DEF("flash_write", NULL, "<address> <message>", cliFlashWrite),
 #endif
 #endif
-#ifdef USE_RX_FRSKY_SPI
-    CLI_COMMAND_DEF("frsky_bind", "initiate binding for FrSky SPI RX", NULL, cliFrSkyBind),
+#ifdef USE_RX_CC2500_BIND
+    CLI_COMMAND_DEF("bind", "initiate binding for RX", NULL, cliRxBind),
 #endif
     CLI_COMMAND_DEF("get", "get variable value", "[name]", cliGet),
 #ifdef USE_GPS
