@@ -91,7 +91,7 @@
 #undef USE_TELEMETRY_CRSF
 #endif
 
-#if !defined(USE_TELEMETRY_CRSF)
+#if !defined(USE_TELEMETRY_CRSF) || !defined(USE_CMS)
 #undef USE_CRSF_CMS_TELEMETRY
 #endif
 
@@ -114,6 +114,10 @@
 #undef USE_SPEKTRUM_VTX_TELEMETRY
 #undef USE_SPEKTRUM_CMS_TELEMETRY
 #undef USE_TELEMETRY_SRXL
+#endif
+
+#if defined(USE_SERIALRX_SBUS) || defined(USE_SERIALRX_FPORT)
+#define USE_SBUS_CHANNELS
 #endif
 
 #if !defined(USE_TELEMETRY_SMARTPORT) && !defined(USE_TELEMETRY_CRSF)

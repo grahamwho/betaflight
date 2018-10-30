@@ -145,7 +145,6 @@ typedef struct uartHardware_s {
     uint8_t af;
 #endif
 #if defined(STM32F7)
-    uint8_t txIrq;
     uint8_t rxIrq;
 #else
     uint8_t irqn;
@@ -172,11 +171,7 @@ extern uartDevice_t *uartDevmap[];
 
 extern const struct serialPortVTable uartVTable[];
 
-#ifdef USE_HAL_DRIVER
-void uartStartTxDMA(uartPort_t *s);
-#else
 void uartTryStartTxDMA(uartPort_t *s);
-#endif
 
 uartPort_t *serialUART(UARTDevice_e device, uint32_t baudRate, portMode_e mode, portOptions_e options);
 
