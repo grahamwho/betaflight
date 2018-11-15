@@ -445,12 +445,23 @@ static void printValuePointer(const clivalue_t *var, const void *valuePointer, b
 
         switch (var->type & VALUE_MODE_MASK) {
         case MODE_DIRECT:
-            if ((value < var->config.minmax.min) || (value > var->config.minmax.max)) {
-                cliPrintCorruptMessage(value);
+            if ((var->type & VALUE_TYPE_MASK) == VAR_UINT32) {
+                if ((uint32_t) value > var->config.u32_max) {
+                    cliPrintCorruptMessage(value);
+                } else {
+                    cliPrintf("%d", value);
+                    if (full) {
+                        cliPrintf(" 0 %d", var->config.u32_max);
+                    }
+                }
             } else {
-                cliPrintf("%d", value);
-                if (full) {
-                    cliPrintf(" %d %d", var->config.minmax.min, var->config.minmax.max);
+                if ((value < var->config.minmax.min) || (value > var->config.minmax.max)) {
+                    cliPrintCorruptMessage(value);
+                } else {
+                    cliPrintf("%d", value);
+                    if (full) {
+                        cliPrintf(" %d %d", var->config.minmax.min, var->config.minmax.max);
+                    }
                 }
             }
             break;
@@ -628,7 +639,7 @@ static void cliPrintVarRange(const clivalue_t *var)
     }
 }
 
-static void cliSetVar(const clivalue_t *var, const int16_t value)
+static void cliSetVar(const clivalue_t *var, const uint32_t value)
 {
     void *ptr = cliGetValuePointer(var);
     uint32_t workValue;
@@ -680,6 +691,10 @@ static void cliSetVar(const clivalue_t *var, const int16_t value)
         case VAR_UINT16:
         case VAR_INT16:
             *(int16_t *)ptr = value;
+            break;
+
+        case VAR_UINT32:
+            *(uint32_t *)ptr = value;
             break;
         }
     }
@@ -1095,14 +1110,20 @@ static void cliSerial(char *cmdline)
 }
 
 #if defined(USE_SERIAL_PASSTHROUGH)
-#ifdef USE_PINIO
 static void cbCtrlLine(void *context, uint16_t ctrl)
 {
-    int pinioDtr = (int)(long)context;
-
-    pinioSet(pinioDtr, !(ctrl & CTRL_LINE_STATE_DTR));
-}
+#ifdef USE_PINIO
+    int contextValue = (int)(long)context;
+    if (contextValue) {
+        pinioSet(contextValue - 1, !(ctrl & CTRL_LINE_STATE_DTR));
+    } else
 #endif /* USE_PINIO */
+    UNUSED(context);
+
+    if (!(ctrl & CTRL_LINE_STATE_DTR)) {
+        systemReset();
+    }
+}
 
 static void cliSerialPassthrough(char *cmdline)
 {
@@ -1114,9 +1135,8 @@ static void cliSerialPassthrough(char *cmdline)
     int id = -1;
     uint32_t baud = 0;
     bool enableBaudCb = false;
-#ifdef USE_PINIO
     int pinioDtr = 0;
-#endif /* USE_PINIO */
+    bool resetOnDtr = false;
     unsigned mode = 0;
     char *saveptr;
     char* tok = strtok_r(cmdline, " ", &saveptr);
@@ -1131,16 +1151,23 @@ static void cliSerialPassthrough(char *cmdline)
             baud = atoi(tok);
             break;
         case 2:
-            if (strstr(tok, "rx") || strstr(tok, "RX"))
+            if (strcasestr(tok, "rx")) {
                 mode |= MODE_RX;
-            if (strstr(tok, "tx") || strstr(tok, "TX"))
+            }
+            if (strcasestr(tok, "tx")) {
                 mode |= MODE_TX;
+            }
             break;
-#ifdef USE_PINIO
         case 3:
-            pinioDtr = atoi(tok);
-            break;
+            if (strncasecmp(tok, "reset", strlen(tok)) == 0) {
+                resetOnDtr = true;
+#ifdef USE_PINIO
+            } else {
+                pinioDtr = atoi(tok);
 #endif /* USE_PINIO */
+            }
+
+            break;
         }
         index++;
         tok = strtok_r(NULL, " ", &saveptr);
@@ -1209,14 +1236,21 @@ static void cliSerialPassthrough(char *cmdline)
         serialSetBaudRateCb(cliPort, serialSetBaudRate, passThroughPort);
     }
 
-    cliPrintLine("Forwarding, power cycle to exit.");
-
-#ifdef USE_PINIO
-    // Register control line state callback
-    if (pinioDtr) {
-        serialSetCtrlLineStateCb(cliPort, cbCtrlLine, (void *)(intptr_t)(pinioDtr - 1));
+    char *resetMessage = "";
+    if (resetOnDtr) {
+        resetMessage = "or drop DTR ";
     }
+
+    cliPrintLinef("Forwarding, power cycle %sto exit.", resetMessage);
+
+    if (resetOnDtr
+#ifdef USE_PINIO
+        || pinioDtr
 #endif /* USE_PINIO */
+        ) {
+        // Register control line state callback
+        serialSetCtrlLineStateCb(cliPort, cbCtrlLine, (void *)(intptr_t)(pinioDtr));
+    }
 
     serialPassthrough(cliPort, passThroughPort, NULL, NULL);
 }
@@ -1238,7 +1272,7 @@ static void printAdjustmentRange(uint8_t dumpMask, const adjustmentRange_t *adju
                 arDefault->auxChannelIndex,
                 MODE_STEP_TO_CHANNEL_VALUE(arDefault->range.startStep),
                 MODE_STEP_TO_CHANNEL_VALUE(arDefault->range.endStep),
-                arDefault->adjustmentFunction,
+                arDefault->adjustmentConfig,
                 arDefault->auxSwitchChannelIndex,
                 arDefault->adjustmentCenter,
                 arDefault->adjustmentScale
@@ -1250,7 +1284,7 @@ static void printAdjustmentRange(uint8_t dumpMask, const adjustmentRange_t *adju
             ar->auxChannelIndex,
             MODE_STEP_TO_CHANNEL_VALUE(ar->range.startStep),
             MODE_STEP_TO_CHANNEL_VALUE(ar->range.endStep),
-            ar->adjustmentFunction,
+            ar->adjustmentConfig,
             ar->auxSwitchChannelIndex,
             ar->adjustmentCenter,
             ar->adjustmentScale
@@ -1296,7 +1330,7 @@ static void cliAdjustmentRange(char *cmdline)
             if (ptr) {
                 val = atoi(ptr);
                 if (val >= 0 && val < ADJUSTMENT_FUNCTION_COUNT) {
-                    ar->adjustmentFunction = val;
+                    ar->adjustmentConfig = val;
                     validArgumentCount++;
                 }
             }
@@ -1340,7 +1374,7 @@ static void cliAdjustmentRange(char *cmdline)
                 ar->auxChannelIndex,
                 MODE_STEP_TO_CHANNEL_VALUE(ar->range.startStep),
                 MODE_STEP_TO_CHANNEL_VALUE(ar->range.endStep),
-                ar->adjustmentFunction,
+                ar->adjustmentConfig,
                 ar->auxSwitchChannelIndex,
                 ar->adjustmentCenter,
                 ar->adjustmentScale
@@ -2597,7 +2631,10 @@ static void printMap(uint8_t dumpMask, const rxConfig_t *rxConfig, const rxConfi
     buf[i] = '\0';
 
     const char *formatMap = "map %s";
-    cliDefaultPrintLinef(dumpMask, equalsDefault, formatMap, bufDefault);
+    if (defaultRxConfig) {
+        bufDefault[i] = '\0';
+        cliDefaultPrintLinef(dumpMask, equalsDefault, formatMap, bufDefault);
+    }   
     cliDumpPrintLinef(dumpMask, equalsDefault, formatMap, buf);
 }
 
@@ -3411,11 +3448,20 @@ STATIC_UNIT_TESTED void cliSet(char *cmdline)
                 int16_t value  = 0;
                 switch (val->type & VALUE_MODE_MASK) {
                 case MODE_DIRECT: {
-                        int16_t value = atoi(eqptr);
+                        if ((val->type & VALUE_TYPE_MASK) == VAR_UINT32) {
+                            uint32_t value = strtol(eqptr, NULL, 10);
 
-                        if (value >= val->config.minmax.min && value <= val->config.minmax.max) {
-                            cliSetVar(val, value);
-                            valueChanged = true;
+                            if (value <= val->config.u32_max) {
+                                cliSetVar(val, value);
+                                valueChanged = true;
+                            }
+                        } else {
+                            int16_t value = atoi(eqptr);
+
+                            if (value >= val->config.minmax.min && value <= val->config.minmax.max) {
+                                cliSetVar(val, value);
+                                valueChanged = true;
+                            }
                         }
                     }
 
@@ -4523,7 +4569,11 @@ const clicmd_t cmdTable[] = {
 #endif
     CLI_COMMAND_DEF("serial", "configure serial ports", NULL, cliSerial),
 #if defined(USE_SERIAL_PASSTHROUGH)
-    CLI_COMMAND_DEF("serialpassthrough", "passthrough serial data to port", "<id> [baud] [mode] [DTR PINIO]: passthrough to serial", cliSerialPassthrough),
+#if defined(USE_PINIO)
+    CLI_COMMAND_DEF("serialpassthrough", "passthrough serial data to port", "<id> [baud] [mode] [dtr pinio|'reset']", cliSerialPassthrough),
+#else
+    CLI_COMMAND_DEF("serialpassthrough", "passthrough serial data to port", "<id> [baud] [mode] ['reset']", cliSerialPassthrough),
+#endif
 #endif
 #ifdef USE_SERVOS
     CLI_COMMAND_DEF("servo", "configure servos", NULL, cliServo),

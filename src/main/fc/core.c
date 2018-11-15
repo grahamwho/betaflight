@@ -67,6 +67,7 @@
 #include "io/beeper.h"
 #include "io/gps.h"
 #include "io/motors.h"
+#include "io/osd.h"
 #include "io/pidaudio.h"
 #include "io/servos.h"
 #include "io/serial.h"
@@ -101,7 +102,8 @@ enum {
 enum {
     ARMING_DELAYED_DISARMED = 0,
     ARMING_DELAYED_NORMAL = 1,
-    ARMING_DELAYED_CRASHFLIP = 2
+    ARMING_DELAYED_CRASHFLIP = 2,
+    ARMING_DELAYED_LAUNCH_CONTROL = 3,
 };
 
 #define GYRO_WATCHDOG_DELAY 80 //  delay for gyro sync
@@ -128,7 +130,7 @@ enum {
 int16_t magHold;
 #endif
 
-static bool flipOverAfterCrashMode = false;
+static bool flipOverAfterCrashActive = false;
 
 static timeUs_t disarmAt;     // Time of automatic disarm when "Don't spin the motors when armed" is enabled and auto_disarm_delay is nonzero
 
@@ -143,6 +145,16 @@ static timeUs_t runawayTakeoffAccumulatedUs = 0;
 static bool runawayTakeoffCheckDisabled = false;
 static timeUs_t runawayTakeoffTriggerUs = 0;
 static bool runawayTakeoffTemporarilyDisabled = false;
+#endif
+
+#ifdef USE_LAUNCH_CONTROL
+static launchControlState_e launchControlState = LAUNCH_CONTROL_DISABLED;
+
+const char * const osdLaunchControlModeNames[] = {
+    "NORMAL",
+    "PITCHONLY",
+    "FULL"
+};
 #endif
 
 PG_REGISTER_WITH_RESET_TEMPLATE(throttleCorrectionConfig_t, throttleCorrectionConfig, PG_THROTTLE_CORRECTION_CONFIG, 0);
@@ -173,6 +185,21 @@ static bool isCalibrating(void)
     return (!accIsCalibrationComplete() && sensors(SENSOR_ACC)) || (!isGyroCalibrationComplete());
 }
 
+#ifdef USE_LAUNCH_CONTROL
+bool canUseLaunchControl(void)
+{
+    if (!STATE(FIXED_WING)
+        && !isUsingSticksForArming()     // require switch arming for safety
+        && IS_RC_MODE_ACTIVE(BOXLAUNCHCONTROL)
+        && (!featureIsEnabled(FEATURE_MOTOR_STOP) || airmodeIsEnabled())  // can't use when motors are stopped
+        && !featureIsEnabled(FEATURE_3D) // pitch control is not 3D aware
+        && (flightModeFlags == 0)) {     // don't want to use unless in acro mode
+        return true;
+    }
+    return false;
+}
+#endif
+
 void resetArmingDisabled(void)
 {
     lastArmingDisabledReason = 0;
@@ -190,7 +217,7 @@ void updateArmingStatus(void)
         }
 
         // Clear the crash flip active status
-        flipOverAfterCrashMode = false;
+        flipOverAfterCrashActive = false;
 
         // If switch is used for arming then check it is not defaulting to on when the RX link recovers from a fault
         if (!isUsingSticksForArming()) {
@@ -306,6 +333,12 @@ void disarm(void)
         DISABLE_ARMING_FLAG(ARMED);
         lastDisarmTimeUs = micros();
 
+#ifdef USE_OSD
+        if (flipOverAfterCrashActive || isLaunchControlActive()) {
+            osdSuppressStats(true);
+        }
+#endif
+
 #ifdef USE_BLACKBOX
         if (blackboxConfig()->device && blackboxConfig()->mode != BLACKBOX_MODE_ALWAYS_ON) { // Close the log upon disarm except when logging mode is ALWAYS ON
             blackboxFinish();
@@ -313,11 +346,11 @@ void disarm(void)
 #endif
         BEEP_OFF;
 #ifdef USE_DSHOT
-        if (isMotorProtocolDshot() && flipOverAfterCrashMode && !featureIsEnabled(FEATURE_3D)) {
+        if (isMotorProtocolDshot() && flipOverAfterCrashActive && !featureIsEnabled(FEATURE_3D)) {
             pwmWriteDshotCommand(ALL_MOTORS, getMotorCount(), DSHOT_CMD_SPIN_DIRECTION_NORMAL, false);
         }
 #endif
-        flipOverAfterCrashMode = false;
+        flipOverAfterCrashActive = false;
 
         // if ARMING_DISABLED_RUNAWAY_TAKEOFF is set then we want to play it's beep pattern instead
         if (!(getArmingDisableFlags() & ARMING_DISABLED_RUNAWAY_TAKEOFF)) {
@@ -344,8 +377,12 @@ void tryArm(void)
 #ifdef USE_DSHOT
         if (currentTimeUs - getLastDshotBeaconCommandTimeUs() < DSHOT_BEACON_GUARD_DELAY_US) {
             if (tryingToArm == ARMING_DELAYED_DISARMED) {
-                if (isModeActivationConditionPresent(BOXFLIPOVERAFTERCRASH) && IS_RC_MODE_ACTIVE(BOXFLIPOVERAFTERCRASH)) {
+                if (IS_RC_MODE_ACTIVE(BOXFLIPOVERAFTERCRASH)) {
                     tryingToArm = ARMING_DELAYED_CRASHFLIP;
+#ifdef USE_LAUNCH_CONTROL
+                } else if (canUseLaunchControl()) {
+                    tryingToArm = ARMING_DELAYED_LAUNCH_CONTROL;
+#endif
                 } else {
                     tryingToArm = ARMING_DELAYED_NORMAL;
                 }
@@ -354,12 +391,12 @@ void tryArm(void)
         }
         if (isMotorProtocolDshot() && isModeActivationConditionPresent(BOXFLIPOVERAFTERCRASH)) {
             if (!(IS_RC_MODE_ACTIVE(BOXFLIPOVERAFTERCRASH) || (tryingToArm == ARMING_DELAYED_CRASHFLIP))) {
-                flipOverAfterCrashMode = false;
+                flipOverAfterCrashActive = false;
                 if (!featureIsEnabled(FEATURE_3D)) {
                     pwmWriteDshotCommand(ALL_MOTORS, getMotorCount(), DSHOT_CMD_SPIN_DIRECTION_NORMAL, false);
                 }
             } else {
-                flipOverAfterCrashMode = true;
+                flipOverAfterCrashActive = true;
 #ifdef USE_RUNAWAY_TAKEOFF
                 runawayTakeoffCheckDisabled = false;
 #endif
@@ -370,6 +407,17 @@ void tryArm(void)
         }
 #endif
 
+#ifdef USE_LAUNCH_CONTROL
+        if (!flipOverAfterCrashActive && (canUseLaunchControl() || (tryingToArm == ARMING_DELAYED_LAUNCH_CONTROL))) {
+            if (launchControlState == LAUNCH_CONTROL_DISABLED) {  // only activate if it hasn't already been triggered
+                launchControlState = LAUNCH_CONTROL_ACTIVE;
+            }
+        }
+#endif
+
+#ifdef USE_OSD
+        osdSuppressStats(false);
+#endif
         ENABLE_ARMING_FLAG(ARMED);
         ENABLE_ARMING_FLAG(WAS_EVER_ARMED);
 
@@ -577,8 +625,10 @@ bool processRx(timeUs_t currentTimeUs)
 
     const throttleStatus_e throttleStatus = calculateThrottleStatus();
     const uint8_t throttlePercent = calculateThrottlePercent();
+    
+    const bool launchControlActive = isLaunchControlActive();
 
-    if (airmodeIsEnabled() && ARMING_FLAG(ARMED)) {
+    if (airmodeIsEnabled() && ARMING_FLAG(ARMED) && !launchControlActive) {
         if (throttlePercent >= rxConfig()->airModeActivateThreshold) {
             airmodeIsActivated = true; // Prevent iterm from being reset
         }
@@ -588,7 +638,7 @@ bool processRx(timeUs_t currentTimeUs)
 
     /* In airmode iterm should be prevented to grow when Low thottle and Roll + Pitch Centered.
      This is needed to prevent iterm winding on the ground, but keep full stabilisation on 0 throttle while in air */
-    if (throttleStatus == THROTTLE_LOW && !airmodeIsActivated) {
+    if (throttleStatus == THROTTLE_LOW && !airmodeIsActivated && !launchControlActive) {
         pidResetIterm();
         if (currentPidProfile->pidAtMinThrottle)
             pidStabilisationState(PID_STABILISATION_ON);
@@ -608,7 +658,7 @@ bool processRx(timeUs_t currentTimeUs)
     if (ARMING_FLAG(ARMED)
         && pidConfig()->runaway_takeoff_prevention
         && !runawayTakeoffCheckDisabled
-        && !flipOverAfterCrashMode
+        && !flipOverAfterCrashActive
         && !runawayTakeoffTemporarilyDisabled
         && !STATE(FIXED_WING)) {
 
@@ -663,6 +713,29 @@ bool processRx(timeUs_t currentTimeUs)
     } else {
         DEBUG_SET(DEBUG_RUNAWAY_TAKEOFF, DEBUG_RUNAWAY_TAKEOFF_DEACTIVATING_DELAY, DEBUG_RUNAWAY_TAKEOFF_FALSE);
         DEBUG_SET(DEBUG_RUNAWAY_TAKEOFF, DEBUG_RUNAWAY_TAKEOFF_DEACTIVATING_TIME, DEBUG_RUNAWAY_TAKEOFF_FALSE);
+    }
+#endif
+
+#ifdef USE_LAUNCH_CONTROL
+    if (ARMING_FLAG(ARMED)) {
+        if (launchControlActive && (throttlePercent > currentPidProfile->launchControlThrottlePercent)) {
+            // throttle limit trigger reached, launch triggered
+            // reset the iterms as they may be at high values from holding the launch position
+            launchControlState = LAUNCH_CONTROL_TRIGGERED;
+            pidResetIterm();
+        }
+    } else {
+        if (launchControlState == LAUNCH_CONTROL_TRIGGERED) {
+            // If trigger mode is MULTIPLE then reset the state when disarmed
+            // and the mode switch is turned off.
+            // For trigger mode SINGLE we never reset the state and only a single
+            // launch is allowed until a reboot.
+            if (currentPidProfile->launchControlAllowTriggerReset && !IS_RC_MODE_ACTIVE(BOXLAUNCHCONTROL)) {
+                launchControlState = LAUNCH_CONTROL_DISABLED;
+            }
+        } else {
+            launchControlState = LAUNCH_CONTROL_DISABLED;
+        }
     }
 #endif
 
@@ -721,7 +794,7 @@ bool processRx(timeUs_t currentTimeUs)
 
 #ifdef USE_DSHOT
     /* Enable beep warning when the crash flip mode is active */
-    if (isMotorProtocolDshot() && isModeActivationConditionPresent(BOXFLIPOVERAFTERCRASH) && IS_RC_MODE_ACTIVE(BOXFLIPOVERAFTERCRASH)) {
+    if (flipOverAfterCrashActive) {
         beeper(BEEPER_CRASH_FLIP_MODE);
     }
 #endif
@@ -871,7 +944,7 @@ static FAST_CODE void subTaskPidController(timeUs_t currentTimeUs)
         && !STATE(FIXED_WING)
         && pidConfig()->runaway_takeoff_prevention
         && !runawayTakeoffCheckDisabled
-        && !flipOverAfterCrashMode
+        && !flipOverAfterCrashActive
         && !runawayTakeoffTemporarilyDisabled
         && (!featureIsEnabled(FEATURE_MOTOR_STOP) || airmodeIsEnabled() || (calculateThrottleStatus() != THROTTLE_LOW))) {
 
@@ -1025,9 +1098,9 @@ FAST_CODE void taskMainPidLoop(timeUs_t currentTimeUs)
 }
 
 
-bool isFlipOverAfterCrashMode(void)
+bool isFlipOverAfterCrashActive(void)
 {
-    return flipOverAfterCrashMode;
+    return flipOverAfterCrashActive;
 }
 
 timeUs_t getLastDisarmTimeUs(void)
@@ -1043,4 +1116,13 @@ bool isTryingToArm()
 void resetTryingToArm()
 {
     tryingToArm = ARMING_DELAYED_DISARMED;
+}
+
+bool isLaunchControlActive(void)
+{
+#ifdef USE_LAUNCH_CONTROL
+    return launchControlState == LAUNCH_CONTROL_ACTIVE;
+#else
+    return false;
+#endif
 }

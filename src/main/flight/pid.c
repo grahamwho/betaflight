@@ -39,6 +39,7 @@
 #include "drivers/sound_beeper.h"
 #include "drivers/time.h"
 
+#include "fc/controlrate_profile.h"
 #include "fc/core.h"
 #include "fc/rc.h"
 
@@ -93,7 +94,7 @@ PG_REGISTER_WITH_RESET_TEMPLATE(pidConfig_t, pidConfig, PG_PID_CONFIG, 2);
 PG_RESET_TEMPLATE(pidConfig_t, pidConfig,
     .pid_process_denom = PID_PROCESS_DENOM_DEFAULT,
     .runaway_takeoff_prevention = true,
-    .runaway_takeoff_deactivate_throttle = 25,  // throttle level % needed to accumulate deactivation time
+    .runaway_takeoff_deactivate_throttle = 20,  // throttle level % needed to accumulate deactivation time
     .runaway_takeoff_deactivate_delay = 500     // Accumulated time (in milliseconds) before deactivation in successful takeoff
 );
 #else
@@ -109,14 +110,16 @@ PG_RESET_TEMPLATE(pidConfig_t, pidConfig,
 
 #define ANTI_GRAVITY_THROTTLE_FILTER_CUTOFF 15  // The anti gravity throttle highpass filter cutoff
 
+#define CRASH_RECOVERY_DETECTION_DELAY_US 1000000  // 1 second delay before crash recovery detection is active after entering a self-level mode
+
 PG_REGISTER_ARRAY_WITH_RESET_FN(pidProfile_t, MAX_PROFILE_COUNT, pidProfiles, PG_PID_PROFILE, 5);
 
 void resetPidProfile(pidProfile_t *pidProfile)
 {
     RESET_CONFIG(pidProfile_t, pidProfile,
         .pid = {
-            [PID_ROLL] =  { 46, 45, 25, 60 },
-            [PID_PITCH] = { 50, 50, 27, 60 },
+            [PID_ROLL] =  { 46, 65, 25, 60 },
+            [PID_PITCH] = { 50, 75, 27, 60 },
             [PID_YAW] =   { 45, 100, 0, 100 },
             [PID_LEVEL] = { 50, 50, 75, 0 },
             [PID_MAG] =   { 40, 0, 0, 0 },
@@ -126,7 +129,7 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .yaw_lowpass_hz = 0,
         .dterm_notch_hz = 0,
         .dterm_notch_cutoff = 0,
-        .itermWindupPointPercent = 40,
+        .itermWindupPointPercent = 100,
         .vbatPidCompensation = 0,
         .pidAtMinThrottle = PID_STABILISATION_ON,
         .levelAngleLimit = 55,
@@ -146,13 +149,13 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .horizon_tilt_effect = 75,
         .horizon_tilt_expert_mode = false,
         .crash_limit_yaw = 200,
-        .itermLimit = 300,
+        .itermLimit = 400,
         .throttle_boost = 5,
         .throttle_boost_cutoff = 15,
         .iterm_rotation = true,
         .smart_feedforward = false,
         .iterm_relax = ITERM_RELAX_RP,
-        .iterm_relax_cutoff = 11,
+        .iterm_relax_cutoff = 20,
         .iterm_relax_type = ITERM_RELAX_SETPOINT,
         .acro_trainer_angle_limit = 20,
         .acro_trainer_lookahead_ms = 50,
@@ -168,6 +171,11 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .dterm_lowpass2_hz = 200,   // second Dterm LPF ON by default
         .dterm_filter_type = FILTER_PT1,
         .dterm_filter2_type = FILTER_PT1,
+        .launchControlMode = LAUNCH_CONTROL_MODE_NORMAL,
+        .launchControlThrottlePercent = 20,
+        .launchControlAngleLimit = 0,
+        .launchControlGain = 40,
+        .launchControlAllowTriggerReset = true,
     );
 #ifdef USE_DYN_LPF
     pidProfile->dterm_lowpass_hz = 120;
@@ -421,6 +429,12 @@ static FAST_RAM_ZERO_INIT float acLimit;
 static FAST_RAM_ZERO_INIT float acErrorLimit;
 #endif
 
+#ifdef USE_LAUNCH_CONTROL
+static FAST_RAM_ZERO_INIT uint8_t launchControlMode;
+static FAST_RAM_ZERO_INIT uint8_t launchControlAngleLimit;
+static FAST_RAM_ZERO_INIT float launchControlKi;
+#endif
+
 void pidResetIterm(void)
 {
     for (int axis = 0; axis < 3; axis++) {
@@ -552,6 +566,16 @@ void pidInitConfig(const pidProfile_t *pidProfile)
     dynLpfIdle = pidProfile->dyn_lpf_dterm_idle / 100.0f;
     dynLpfIdlePoint = (dynLpfIdle - (dynLpfIdle * dynLpfIdle * dynLpfIdle) / 3.0f) * 1.5f;
     dynLpfInvIdlePointScaled = 1 / (1 - dynLpfIdlePoint) * (pidProfile->dyn_lpf_dterm_max_hz - dynLpfMin);
+#endif
+
+#ifdef USE_LAUNCH_CONTROL
+    launchControlMode = pidProfile->launchControlMode;
+    if (sensors(SENSOR_ACC)) {
+        launchControlAngleLimit = pidProfile->launchControlAngleLimit;
+    } else {
+        launchControlAngleLimit = 0;
+    }
+    launchControlKi = ITERM_SCALE * pidProfile->launchControlGain;
 #endif
 }
 
@@ -896,6 +920,7 @@ void FAST_CODE applySmartFeedforward(int axis)
 }
 #endif // USE_SMART_FEEDFORWARD
 
+#if defined(USE_ITERM_RELAX)
 #if defined(USE_ABSOLUTE_CONTROL)
 STATIC_UNIT_TESTED void applyAbsoluteControl(const int axis, const float gyroRate, const bool itermRelaxIsEnabled,
     const float setpointLpf, const float setpointHpf,
@@ -938,7 +963,6 @@ STATIC_UNIT_TESTED void applyAbsoluteControl(const int axis, const float gyroRat
 }
 #endif
 
-#if defined(USE_ITERM_RELAX)
 STATIC_UNIT_TESTED void applyItermRelax(const int axis, const float iterm,
     const float gyroRate, float *itermErrorRate, float *currentPidSetpoint)
 {
@@ -979,18 +1003,78 @@ STATIC_UNIT_TESTED void applyItermRelax(const int axis, const float iterm,
 }
 #endif
 
+#ifdef USE_LAUNCH_CONTROL
+#define LAUNCH_CONTROL_MAX_RATE 100.0f
+#define LAUNCH_CONTROL_MIN_RATE 5.0f
+#define LAUNCH_CONTROL_ANGLE_WINDOW 10.0f  // The remaining angle degrees where rate dampening starts
+
+static float applyLaunchControl(int axis, const rollAndPitchTrims_t *angleTrim)
+{
+    float ret = 0.0f;
+
+    // Scale the rates based on stick deflection only. Fixed rates with a max of 100deg/sec
+    // reached at 50% stick deflection. This keeps the launch control positioning consistent
+    // regardless of the user's rates.
+    if ((axis == FD_PITCH) || (launchControlMode != LAUNCH_CONTROL_MODE_PITCHONLY)) {
+        const float stickDeflection = constrainf(getRcDeflection(axis), -0.5f, 0.5f);
+        ret = LAUNCH_CONTROL_MAX_RATE * stickDeflection * 2;
+    }
+
+    // If ACC is enabled and a limit angle is set, then try to limit forward tilt
+    // to that angle and slow down the rate as the limit is approached to reduce overshoot
+    if ((axis == FD_PITCH) && (launchControlAngleLimit > 0) && (ret > 0)) {
+        const float currentAngle = (attitude.raw[axis] - angleTrim->raw[axis]) / 10.0f;
+        if (currentAngle >= launchControlAngleLimit) {
+            ret = 0.0f;
+        } else {
+            //for the last 10 degrees scale the rate from the current input to 5 dps
+            const float angleDelta = launchControlAngleLimit - currentAngle;
+            if (angleDelta <= LAUNCH_CONTROL_ANGLE_WINDOW) {
+                ret = scaleRangef(angleDelta, 0, LAUNCH_CONTROL_ANGLE_WINDOW, LAUNCH_CONTROL_MIN_RATE, ret);
+            }
+        }
+    }
+    return ret;
+}
+#endif
+
 // Betaflight pid controller, which will be maintained in the future with additional features specialised for current (mini) multirotor usage.
 // Based on 2DOF reference design (matlab)
 void FAST_CODE pidController(const pidProfile_t *pidProfile, const rollAndPitchTrims_t *angleTrim, timeUs_t currentTimeUs)
 {
     static float previousGyroRateDterm[XYZ_AXIS_COUNT];
     static float previousPidSetpoint[XYZ_AXIS_COUNT];
+    static timeUs_t levelModeStartTimeUs = 0;
+    static bool gpsRescuePreviousState = false;
 
     const float tpaFactor = getThrottlePIDAttenuation();
+
+#ifdef USE_TPA_MODE
+    const float tpaFactorKp = (currentControlRateProfile->tpaMode == TPA_MODE_PD) ? tpaFactor : 1.0f;
+#else
+    const float tpaFactorKp = tpaFactor;
+#endif
 
 #ifdef USE_YAW_SPIN_RECOVERY
     const bool yawSpinActive = gyroYawSpinDetected();
 #endif
+
+    const bool launchControlActive = isLaunchControlActive();
+
+    const bool gpsRescueIsActive = FLIGHT_MODE(GPS_RESCUE_MODE);
+    const bool levelModeActive = FLIGHT_MODE(ANGLE_MODE) || FLIGHT_MODE(HORIZON_MODE) || gpsRescueIsActive;
+
+    // Keep track of when we entered a self-level mode so that we can
+    // add a guard time before crash recovery can activate.
+    // Also reset the guard time whenever GPS Rescue is activated.
+    if (levelModeActive) {
+        if ((levelModeStartTimeUs == 0) || (gpsRescueIsActive && !gpsRescuePreviousState)) {
+            levelModeStartTimeUs = currentTimeUs;
+        }
+    } else {
+        levelModeStartTimeUs = 0;
+    }
+    gpsRescuePreviousState = gpsRescueIsActive;
 
     // Dynamic i component,
     if ((antiGravityMode == ANTI_GRAVITY_SMOOTH) && antiGravityEnabled) {
@@ -1023,15 +1107,21 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, const rollAndPitchT
             currentPidSetpoint = accelerationLimit(axis, currentPidSetpoint);
         }
         // Yaw control is GYRO based, direct sticks control is applied to rate PID
-        if ((FLIGHT_MODE(ANGLE_MODE) || FLIGHT_MODE(HORIZON_MODE) || FLIGHT_MODE(GPS_RESCUE_MODE)) && axis != FD_YAW) {
+        if (levelModeActive && (axis != FD_YAW)) {
             currentPidSetpoint = pidLevel(axis, pidProfile, angleTrim, currentPidSetpoint);
         }
 
 #ifdef USE_ACRO_TRAINER
-        if ((axis != FD_YAW) && acroTrainerActive && !inCrashRecoveryMode) {
+        if ((axis != FD_YAW) && acroTrainerActive && !inCrashRecoveryMode && !launchControlActive) {
             currentPidSetpoint = applyAcroTrainer(axis, angleTrim, currentPidSetpoint);
         }
 #endif // USE_ACRO_TRAINER
+
+#ifdef USE_LAUNCH_CONTROL
+        if (launchControlActive) {
+            currentPidSetpoint = applyLaunchControl(axis, angleTrim);
+        }
+#endif
 
         // Handle yaw spin recovery - zero the setpoint on yaw to aid in recovery
         // It's not necessary to zero the set points for R/P because the PIDs will be zeroed below
@@ -1052,7 +1142,9 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, const rollAndPitchT
         float itermErrorRate = errorRate;
 
 #if defined(USE_ITERM_RELAX)
-        applyItermRelax(axis, iterm, gyroRate, &itermErrorRate, &currentPidSetpoint);
+        if (!launchControlActive) {
+            applyItermRelax(axis, iterm, gyroRate, &itermErrorRate, &currentPidSetpoint);
+        }
 #endif
 
         // --------low-level gyro-based PID based on 2DOF PID controller. ----------
@@ -1060,16 +1152,23 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, const rollAndPitchT
         // b = 1 and only c (feedforward weight) can be tuned (amount derivative on measurement or error).
 
         // -----calculate P component
-        pidData[axis].P = pidCoefficient[axis].Kp * errorRate * tpaFactor;
+        pidData[axis].P = pidCoefficient[axis].Kp * errorRate * tpaFactorKp;
         if (axis == FD_YAW) {
             pidData[axis].P = ptermYawLowpassApplyFn((filter_t *) &ptermYawLowpass, pidData[axis].P);
         }
 
         // -----calculate I component
-        pidData[axis].I = constrainf(iterm + pidCoefficient[axis].Ki * itermErrorRate * dynCi, -itermLimit, itermLimit);
+#ifdef USE_LAUNCH_CONTROL
+        // if launch control is active override the iterm gains
+        const float Ki = launchControlActive ? launchControlKi : pidCoefficient[axis].Ki;
+#else
+        const float Ki = pidCoefficient[axis].Ki;
+#endif
+        pidData[axis].I = constrainf(iterm + Ki * itermErrorRate * dynCi, -itermLimit, itermLimit);
 
         // -----calculate D component
-        if (pidCoefficient[axis].Kd > 0) {
+        // disable D if launch control is active
+        if ((pidCoefficient[axis].Kd > 0) && !launchControlActive){
 
             // Divide rate change by dT to get differential (ie dr/dt).
             // dT is fixed and calculated from the target PID loop time
@@ -1079,7 +1178,9 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, const rollAndPitchT
             const float delta =
                 - (gyroRateDterm[axis] - previousGyroRateDterm[axis]) * pidFrequency;
 
-            detectAndSetCrashRecovery(pidProfile->crash_recovery, axis, currentTimeUs, delta, errorRate);
+            if (cmpTimeUs(currentTimeUs, levelModeStartTimeUs) > CRASH_RECOVERY_DETECTION_DELAY_US) {
+                detectAndSetCrashRecovery(pidProfile->crash_recovery, axis, currentTimeUs, delta, errorRate);
+            }
 
             pidData[axis].D = pidCoefficient[axis].Kd * delta * tpaFactor;
         } else {
@@ -1089,8 +1190,8 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, const rollAndPitchT
 
         // -----calculate feedforward component
         
-        // Only enable feedforward for rate mode
-        const float feedforwardGain = flightModeFlags ? 0.0f : pidCoefficient[axis].Kf;
+        // Only enable feedforward for rate mode and if launch control is inactive
+        const float feedforwardGain = (flightModeFlags || launchControlActive) ? 0.0f : pidCoefficient[axis].Kf;
         
         if (feedforwardGain > 0) {
 
@@ -1125,6 +1226,25 @@ void FAST_CODE pidController(const pidProfile_t *pidProfile, const rollAndPitchT
         }
 #endif // USE_YAW_SPIN_RECOVERY
 
+#ifdef USE_LAUNCH_CONTROL
+        // Disable P/I appropriately based on the launch control mode
+        if (launchControlActive) {
+            // if not using FULL mode then disable I accumulation on yaw as
+            // yaw has a tendency to windup
+            if (launchControlMode != LAUNCH_CONTROL_MODE_FULL) {
+                pidData[FD_YAW].I = 0;
+            }
+
+            // for pitch-only mode we disable everything except pitch P/I
+            if (launchControlMode == LAUNCH_CONTROL_MODE_PITCHONLY) {
+                pidData[FD_ROLL].P = 0;
+                pidData[FD_ROLL].I = 0;
+                pidData[FD_YAW].P = 0;
+                // don't let I go negative (pitch backwards) as front motors are limited in the mixer
+                pidData[FD_PITCH].I = MAX(0.0f, pidData[FD_PITCH].I);
+            }
+        }
+#endif
         // calculating the PID sum
         pidData[axis].Sum = pidData[axis].P + pidData[axis].I + pidData[axis].D + pidData[axis].F;
     }

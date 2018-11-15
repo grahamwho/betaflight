@@ -71,9 +71,7 @@
 #include "flight/failsafe.h"
 #include "flight/position.h"
 #include "flight/imu.h"
-#ifdef USE_ESC_SENSOR
 #include "flight/mixer.h"
-#endif
 #include "flight/pid.h"
 
 #include "io/asyncfatfs/asyncfatfs.h"
@@ -135,12 +133,13 @@ typedef struct statistic_s {
     int16_t max_speed;
     int16_t min_voltage; // /10
     int16_t max_current; // /10
-    int16_t min_rssi;
+    uint8_t min_rssi;
     int32_t max_altitude;
     int16_t max_distance;
     float max_g_force;
     int16_t max_esc_temp;
     int32_t max_esc_rpm;
+    uint8_t min_link_quality;
 } statistic_t;
 
 static statistic_t stats;
@@ -152,6 +151,8 @@ static uint8_t armState;
 static bool lastArmState;
 
 static displayPort_t *osdDisplayPort;
+
+static bool suppressStatsDisplay = false;
 
 #ifdef USE_ESC_SENSOR
 static escSensorData_t *escDataCombined;
@@ -207,6 +208,7 @@ static const uint8_t osdElementDisplayOrder[] = {
     OSD_NUMERICAL_VARIO,
     OSD_COMPASS_BAR,
     OSD_ANTI_GRAVITY,
+    OSD_MOTOR_DIAG,
     OSD_FLIP_ARROW,
 #ifdef USE_RTC_TIME
     OSD_RTC_DATETIME,
@@ -216,6 +218,9 @@ static const uint8_t osdElementDisplayOrder[] = {
 #endif
 #ifdef USE_ADC_INTERNAL
     OSD_CORE_TEMPERATURE,
+#endif
+#ifdef USE_RX_LINK_QUALITY_INFO
+    OSD_LINK_QUALITY,
 #endif
 };
 
@@ -480,7 +485,7 @@ static bool osdDrawSingleElement(uint8_t item)
         {
             const int angleR = attitude.values.roll / 10;
             const int angleP = attitude.values.pitch / 10; // still gotta update all angleR and angleP pointers.
-            if (IS_RC_MODE_ACTIVE(BOXFLIPOVERAFTERCRASH)) {
+            if (isFlipOverAfterCrashActive()) {
                 if (angleP > 0 && ((angleR > 175 && angleR < 180) || (angleR > -180 && angleR < -175))) {
                     buff[0] = SYM_ARROW_SOUTH;
                 } else if (angleP > 0 && angleR > 0 && angleR < 175) {
@@ -503,12 +508,27 @@ static bool osdDrawSingleElement(uint8_t item)
     case OSD_RSSI_VALUE:
         {
             uint16_t osdRssi = getRssi() * 100 / 1024; // change range
-            if (osdRssi >= 100)
+            if (osdRssi >= 100) {
                 osdRssi = 99;
+            }
 
             tfp_sprintf(buff, "%c%2d", SYM_RSSI, osdRssi);
             break;
         }
+
+#ifdef USE_RX_LINK_QUALITY_INFO
+    case OSD_LINK_QUALITY:
+        {
+            // change range to 0-9 (two sig. fig. adds little extra value, also reduces screen estate)
+            uint8_t osdLinkQuality = rxGetLinkQuality() * 10 / LINK_QUALITY_MAX_VALUE;
+            if (osdLinkQuality >= 10) {
+                osdLinkQuality = 9;
+            }
+
+            tfp_sprintf(buff, "%1d", osdLinkQuality);
+            break;
+        }
+#endif
 
     case OSD_MAIN_BATT_VOLTAGE:
         buff[0] = osdGetBatterySymbol(osdGetBatteryAverageCellVoltage());
@@ -575,6 +595,19 @@ static bool osdDrawSingleElement(uint8_t item)
     case OSD_HOME_DIST:
         if (STATE(GPS_FIX) && STATE(GPS_FIX_HOME)) {
             const int32_t distance = osdGetMetersToSelectedUnit(GPS_distanceToHome);
+            tfp_sprintf(buff, "%d%c", distance, osdGetMetersToSelectedUnitSymbol());
+        } else {
+            // We use this symbol when we don't have a FIX
+            buff[0] = SYM_COLON;
+            // overwrite any previous distance with blanks
+            memset(buff + 1, SYM_BLANK, 6);
+            buff[7] = '\0';
+        }
+        break;
+
+    case OSD_TOTAL_DIST:
+        if (STATE(GPS_FIX) && STATE(GPS_FIX_HOME)) {
+            const int32_t distance = osdGetMetersToSelectedUnit(GPS_distanceFlownInCm / 100);
             tfp_sprintf(buff, "%d%c", distance, osdGetMetersToSelectedUnitSymbol());
         } else {
             // We use this symbol when we don't have a FIX
@@ -654,6 +687,20 @@ static bool osdDrawSingleElement(uint8_t item)
 
             break;
         }
+		
+    case OSD_MOTOR_DIAG:
+        if(areMotorsRunning()) {
+            int maxIdx = 0;
+            int i = 0;
+            for(; i < getMotorCount(); i++) {
+                if(motor[i] > motor[maxIdx]) {
+                    maxIdx = i;
+                }
+                buff[i] =  0x88 - scaleRange(motor[i], motorOutputLow, motorOutputHigh, 0, 8);
+            }
+            buff[i] = '\0';
+        }
+        break;
 
     case OSD_CRAFT_NAME:
         // This does not strictly support iterative updating if the craft name changes at run time. But since the craft name is not supposed to be changing this should not matter, and blanking the entire length of the craft name string on update will make it impossible to configure elements to be displayed on the right hand side of the craft name.
@@ -708,8 +755,9 @@ static bool osdDrawSingleElement(uint8_t item)
             // Get pitch and roll limits in tenths of degrees
             const int maxPitch = osdConfig()->ahMaxPitch * 10;
             const int maxRoll = osdConfig()->ahMaxRoll * 10;
-            const int rollAngle = constrain(attitude.values.roll, -maxRoll, maxRoll);
-            int pitchAngle = constrain(attitude.values.pitch, -maxPitch, maxPitch);
+            const int ahSign = osdConfig()->ahInvert ? -1 : 1;
+            const int rollAngle = constrain(attitude.values.roll * ahSign, -maxRoll, maxRoll);
+            int pitchAngle = constrain(attitude.values.pitch * ahSign, -maxPitch, maxPitch);
             // Convert pitchAngle to y compensation value
             // (maxPitch / 25) divisor matches previous settings of fixed divisor of 8 and fixed max AHI pitch angle of 20.0 degrees
             if (maxPitch > 0) {
@@ -785,6 +833,8 @@ static bool osdDrawSingleElement(uint8_t item)
             static timeUs_t armingDisabledUpdateTimeUs;
             static unsigned armingDisabledDisplayIndex;
 
+            CLR_BLINK(OSD_WARNINGS);
+
             // Cycle through the arming disabled reasons
             if (osdWarnGetState(OSD_WARNING_ARMING_DISABLE)) {
                 if (IS_RC_MODE_ACTIVE(BOXARM) && isArmingDisabled()) {
@@ -836,17 +886,20 @@ static bool osdDrawSingleElement(uint8_t item)
 #endif
             if (osdWarnGetState(OSD_WARNING_FAIL_SAFE) && failsafeIsActive()) {
                 osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, "FAIL SAFE");
+                SET_BLINK(OSD_WARNINGS);
                 break;
             }
 
             if (osdWarnGetState(OSD_WARNING_BATTERY_CRITICAL) && batteryState == BATTERY_CRITICAL) {
                 osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, " LAND NOW");
+                SET_BLINK(OSD_WARNINGS);
                 break;
             }
 
             // Show warning if in HEADFREE flight mode
             if (FLIGHT_MODE(HEADFREE_MODE)) {
                 osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, "HEADFREE");
+                SET_BLINK(OSD_WARNINGS);
                 break;
             }
 
@@ -857,7 +910,7 @@ static bool osdDrawSingleElement(uint8_t item)
                 tfp_sprintf(coreTemperatureWarningMsg, "CORE: %3d%c", osdConvertTemperatureToSelectedUnit(coreTemperature), osdGetTemperatureSymbolForSelectedUnit());
 
                 osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, coreTemperatureWarningMsg);
-
+                SET_BLINK(OSD_WARNINGS);
                 break;
             }
 #endif
@@ -908,19 +961,36 @@ static bool osdDrawSingleElement(uint8_t item)
 
                 if (escWarningCount > 0) {
                     osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, escWarningMsg);
+                    SET_BLINK(OSD_WARNINGS);
                     break;
                 }
             }
 #endif
 
             // Warn when in flip over after crash mode
-            if (osdWarnGetState(OSD_WARNING_CRASH_FLIP) && isFlipOverAfterCrashMode()) {
+            if (osdWarnGetState(OSD_WARNING_CRASH_FLIP) && isFlipOverAfterCrashActive()) {
                 osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, "CRASH FLIP");
                 break;
             }
 
+#ifdef USE_LAUNCH_CONTROL
+            // Warn when in launch control mode
+            if (osdWarnGetState(OSD_WARNING_LAUNCH_CONTROL) && isLaunchControlActive()) {
+                if (sensors(SENSOR_ACC)) {
+                    char launchControlMsg[OSD_FORMAT_MESSAGE_BUFFER_SIZE];
+                    const int pitchAngle = constrain((attitude.raw[FD_PITCH] - accelerometerConfig()->accelerometerTrims.raw[FD_PITCH]) / 10, -90, 90);
+                    tfp_sprintf(launchControlMsg, "LAUNCH %d", pitchAngle);
+                    osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, launchControlMsg);
+                } else {
+                    osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, "LAUNCH");
+                }
+                break;
+            }
+#endif
+
             if (osdWarnGetState(OSD_WARNING_BATTERY_WARNING) && batteryState == BATTERY_WARNING) {
                 osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, "LOW BATTERY");
+                SET_BLINK(OSD_WARNINGS);
                 break;
             }
 
@@ -928,6 +998,7 @@ static bool osdDrawSingleElement(uint8_t item)
             // Show warning if rc smoothing hasn't initialized the filters
             if (osdWarnGetState(OSD_WARNING_RC_SMOOTHING) && ARMING_FLAG(ARMED) && !rcSmoothingInitializationComplete()) {
                 osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, "RCSMOOTHING");
+                SET_BLINK(OSD_WARNINGS);
                 break;
             }
 #endif
@@ -1110,6 +1181,7 @@ static void osdDrawElements(void)
         osdDrawSingleElement(OSD_GPS_LON);
         osdDrawSingleElement(OSD_HOME_DIST);
         osdDrawSingleElement(OSD_HOME_DIR);
+        osdDrawSingleElement(OSD_TOTAL_DIST);
     }
 #endif // GPS
 
@@ -1173,6 +1245,7 @@ void pgResetFn_osdConfig(osdConfig_t *osdConfig)
 
     osdConfig->ahMaxPitch = 20; // 20 degrees
     osdConfig->ahMaxRoll = 40; // 40 degrees
+    osdConfig->ahInvert = false;
 }
 
 static void osdDrawLogo(int x, int y)
@@ -1244,18 +1317,6 @@ void osdUpdateAlarms(void)
         SET_BLINK(OSD_RSSI_VALUE);
     } else {
         CLR_BLINK(OSD_RSSI_VALUE);
-    }
-
-    // Determine if the OSD_WARNINGS should blink
-    if (getBatteryState() != BATTERY_OK
-           && (osdWarnGetState(OSD_WARNING_BATTERY_CRITICAL) || osdWarnGetState(OSD_WARNING_BATTERY_WARNING))
-#ifdef USE_DSHOT
-           && (!isTryingToArm())
-#endif
-       ) {
-        SET_BLINK(OSD_WARNINGS);
-    } else {
-        CLR_BLINK(OSD_WARNINGS);
     }
 
     if (getBatteryState() == BATTERY_OK) {
@@ -1332,13 +1393,14 @@ static void osdResetStats(void)
     stats.max_current  = 0;
     stats.max_speed    = 0;
     stats.min_voltage  = 500;
-    stats.min_rssi     = 99;
+    stats.min_rssi     = 99; // percent
     stats.max_altitude = 0;
     stats.max_distance = 0;
     stats.armed_time   = 0;
     stats.max_g_force  = 0;
     stats.max_esc_temp = 0;
     stats.max_esc_rpm  = 0;
+    stats.min_link_quality = 99; // percent
 }
 
 static void osdUpdateStats(void)
@@ -1381,6 +1443,13 @@ static void osdUpdateStats(void)
     if (stats.max_g_force < osdGForce) {
         stats.max_g_force = osdGForce;
     }
+
+#ifdef USE_RX_LINK_QUALITY_INFO
+    value = rxGetLinkQualityPercent();
+    if (stats.min_link_quality > value) {
+        stats.min_link_quality = value;
+    }
+#endif
 
 #ifdef USE_GPS
     if (STATE(GPS_FIX) && STATE(GPS_FIX_HOME)) {
@@ -1499,15 +1568,17 @@ static void osdShowStats(uint16_t endBatteryVoltage)
         osdDisplayStatisticLabel(top++, osdTimerSourceNames[OSD_TIMER_SRC(osdConfig()->timers[OSD_TIMER_2])], buff);
     }
 
-    if (osdStatGetState(OSD_STAT_MAX_SPEED) && STATE(GPS_FIX)) {
-        itoa(stats.max_speed, buff, 10);
+#ifdef USE_GPS
+    if (osdStatGetState(OSD_STAT_MAX_SPEED) && featureIsEnabled(FEATURE_GPS)) {
+        itoa(stats.max_speed, buff, 10);    
         osdDisplayStatisticLabel(top++, "MAX SPEED", buff);
     }
 
-    if (osdStatGetState(OSD_STAT_MAX_DISTANCE)) {
+    if (osdStatGetState(OSD_STAT_MAX_DISTANCE) && featureIsEnabled(FEATURE_GPS)) {
         tfp_sprintf(buff, "%d%c", osdGetMetersToSelectedUnit(stats.max_distance), osdGetMetersToSelectedUnitSymbol());
         osdDisplayStatisticLabel(top++, "MAX DISTANCE", buff);
     }
+#endif
 
     if (osdStatGetState(OSD_STAT_MIN_BATTERY)) {
         tfp_sprintf(buff, "%d.%1d%c", stats.min_voltage / 10, stats.min_voltage % 10, SYM_VOLT);
@@ -1578,6 +1649,22 @@ static void osdShowStats(uint16_t endBatteryVoltage)
     }
 #endif
 
+#ifdef USE_RX_LINK_QUALITY_INFO
+    if (osdStatGetState(OSD_STAT_MIN_LINK_QUALITY)) {
+        itoa(stats.min_link_quality, buff, 10);
+        strcat(buff, "%");
+        osdDisplayStatisticLabel(top++, "MIN LINK", buff);
+    }
+#endif
+
+#ifdef USE_GPS
+    if (osdStatGetState(OSD_STAT_TOTAL_DISTANCE) && featureIsEnabled(FEATURE_GPS)) {
+        const uint32_t distanceFlown = GPS_distanceFlownInCm / 100;
+        tfp_sprintf(buff, "%d%c", osdGetMetersToSelectedUnit(distanceFlown), osdGetMetersToSelectedUnitSymbol());
+        osdDisplayStatisticLabel(top++, "TOTAL DISTANCE", buff);
+    }
+#endif
+
 }
 
 static void osdShowArmed(void)
@@ -1603,6 +1690,7 @@ STATIC_UNIT_TESTED void osdRefresh(timeUs_t currentTimeUs)
             osdShowArmed();
             resumeRefreshAt = currentTimeUs + (REFRESH_1S / 2);
         } else if (isSomeStatEnabled()
+                   && !suppressStatsDisplay
                    && (!(getArmingDisableFlags() & ARMING_DISABLED_RUNAWAY_TAKEOFF)
                        || !VISIBLE(osdConfig()->item_pos[OSD_WARNINGS]))) { // suppress stats if runaway takeoff triggered disarm and WARNINGS element is visible
             osdStatsEnabled = true;
@@ -1734,4 +1822,8 @@ void osdUpdate(timeUs_t currentTimeUs)
 #endif
 }
 
+void osdSuppressStats(bool flag)
+{
+    suppressStatsDisplay = flag;
+}
 #endif // USE_OSD
