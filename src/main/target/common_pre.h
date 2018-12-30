@@ -59,6 +59,8 @@
 #define USE_ADC_INTERNAL
 #define USE_USB_CDC_HID
 #define USE_USB_MSC
+#define USE_PERSISTENT_MSC_RTC
+#define USE_DMA_SPEC
 
 #if defined(STM32F40_41xxx) || defined(STM32F411xE)
 #define USE_OVERCLOCK
@@ -78,7 +80,10 @@
 #define USE_ADC_INTERNAL
 #define USE_USB_CDC_HID
 #define USE_USB_MSC
-#endif
+#define USE_PERSISTENT_MSC_RTC
+#define USE_MCO
+#define USE_DMA_SPEC
+#endif // STM32F7
 
 #if defined(STM32F4) || defined(STM32F7)
 #define TASK_GYROPID_DESIRED_PERIOD     125 // 125us = 8kHz
@@ -139,8 +144,6 @@
 #define USE_SERIALRX_SUMH       // Graupner legacy protocol
 #define USE_SERIALRX_XBUS       // JR
 
-
-
 #if (FLASH_SIZE > 64)
 #define MAX_PROFILE_COUNT 3
 #else
@@ -195,6 +198,7 @@
 #define USE_RC_SMOOTHING_FILTER
 #define USE_ITERM_RELAX
 #define USE_DYN_LPF
+#define USE_INTEGRATED_YAW_CONTROL
 
 #ifdef USE_SERIALRX_SPEKTRUM
 #define USE_SPEKTRUM_BIND
@@ -206,6 +210,7 @@
 #define USE_SPEKTRUM_VTX_TELEMETRY
 #define USE_SPEKTRUM_CMS_TELEMETRY
 #endif
+#define USE_SERIAL_4WAY_BLHELI_BOOTLOADER
 #endif
 
 #if (FLASH_SIZE > 256)
@@ -233,4 +238,8 @@
 #define USE_VARIO
 #define USE_RX_LINK_QUALITY_INFO
 #define USE_ESC_SENSOR_TELEMETRY
+#define USE_OSD_PROFILES
+#define USE_OSD_STICK_OVERLAY
+#define USE_ESCSERIAL_SIMONK
+#define USE_SERIAL_4WAY_SK_BOOTLOADER
 #endif

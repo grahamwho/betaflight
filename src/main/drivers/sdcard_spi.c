@@ -27,10 +27,14 @@
 
 #include "drivers/nvic.h"
 #include "drivers/io.h"
-#include "dma.h"
+#include "drivers/dma.h"
+#include "drivers/dma_reqmap.h"
 
 #include "drivers/bus_spi.h"
 #include "drivers/time.h"
+
+#include "pg/bus_spi.h"
+#include "pg/sdcard.h"
 
 #include "sdcard.h"
 #include "sdcard_impl.h"
@@ -465,26 +469,51 @@ static bool sdcard_checkInitDone(void)
     return status == 0x00;
 }
 
+void sdcardSpi_preInit(const sdcardConfig_t *config)
+{
+    spiPreinitRegister(config->chipSelectTag, IOCFG_IPU, 1);
+}
+
 /**
  * Begin the initialization process for the SD card. This must be called first before any other sdcard_ routine.
  */
-static void sdcardSpi_init(const sdcardConfig_t *config)
+static void sdcardSpi_init(const sdcardConfig_t *config, const spiPinConfig_t *spiConfig)
 {
+#ifndef USE_DMA_SPEC
+    UNUSED(spiConfig);
+#endif
+
     sdcard.enabled = config->mode;
     if (!sdcard.enabled) {
         sdcard.state = SDCARD_STATE_NOT_PRESENT;
         return;
     }
 
-    spiBusSetInstance(&sdcard.busdev, spiInstanceByDevice(SPI_CFG_TO_DEV(config->device)));
+    SPIDevice spiDevice = SPI_CFG_TO_DEV(config->device);
 
-    sdcard.useDMAForTx = config->useDma;
-    if (sdcard.useDMAForTx) {
-#if defined(STM32F4) || defined(STM32F7)
-        sdcard.dmaChannel = config->dmaChannel;
+    spiBusSetInstance(&sdcard.busdev, spiInstanceByDevice(spiDevice));
+
+    if (config->useDma) {
+        dmaIdentifier_e dmaIdentifier = DMA_NONE;
+
+#ifdef USE_DMA_SPEC
+        const dmaChannelSpec_t *dmaChannelSpec = dmaGetChannelSpec(DMA_PERIPH_SPI_TX, config->device, spiConfig[spiDevice].txDmaopt);
+
+        if (dmaChannelSpec) {
+            dmaIdentifier = dmaGetIdentifier(dmaChannelSpec->ref);
+            sdcard.dmaChannel = dmaChannelSpec->channel; // XXX STM32F3 doesn't have this
+        }
+#else
+        dmaIdentifier = config->dmaIdentifier;
 #endif
-        sdcard.dma = dmaGetDescriptorByIdentifier(config->dmaIdentifier);
-        dmaInit(config->dmaIdentifier, OWNER_SDCARD, 0);
+
+        if (dmaIdentifier) {
+            sdcard.dma = dmaGetDescriptorByIdentifier(dmaIdentifier);
+            dmaInit(dmaIdentifier, OWNER_SDCARD, 0);
+            sdcard.useDMAForTx = true;
+        } else {
+            sdcard.useDMAForTx = false;
+        }
     }
 
     IO_t chipSelectIO;
@@ -1075,6 +1104,7 @@ static void sdcardSpi_setProfilerCallback(sdcard_profilerCallback_c callback)
 #endif
 
 sdcardVTable_t sdcardSpiVTable = {
+    sdcardSpi_preInit,
     sdcardSpi_init,
     sdcardSpi_readBlock,
     sdcardSpi_beginWriteBlocks,

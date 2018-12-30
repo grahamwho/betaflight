@@ -68,6 +68,7 @@
 #include "fc/rc.h"
 #include "fc/runtime_config.h"
 
+#include "flight/gps_rescue.h"
 #include "flight/failsafe.h"
 #include "flight/position.h"
 #include "flight/imu.h"
@@ -94,6 +95,9 @@
 #include "sensors/battery.h"
 #include "sensors/esc_sensor.h"
 #include "sensors/sensors.h"
+#if (!defined(SIMULATOR_BUILD) && !defined(UNIT_TEST)  && defined(USE_GYRO_DATA_ANALYSE))
+#include "sensors/gyroanalyse.h"
+#endif
 
 #ifdef USE_HARDWARE_REVISION_DETECTION
 #include "hardware_revision.h"
@@ -101,6 +105,11 @@
 
 #define VIDEO_BUFFER_CHARS_PAL    480
 #define FULL_CIRCLE 360
+
+#define STICK_OVERLAY_HORIZONTAL_CHAR   '-'
+#define STICK_OVERLAY_VERTICAL_CHAR     '|'
+#define STICK_OVERLAY_CROSS_CHAR        '+'
+#define STICK_OVERLAY_CURSOR_CHAR       '0'
 
 const char * const osdTimerSourceNames[] = {
     "ON TIME  ",
@@ -131,7 +140,7 @@ static float osdGForce = 0;
 typedef struct statistic_s {
     timeUs_t armed_time;
     int16_t max_speed;
-    int16_t min_voltage; // /10
+    int16_t min_voltage; // /100
     int16_t max_current; // /10
     uint8_t min_rssi;
     int32_t max_altitude;
@@ -142,14 +151,37 @@ typedef struct statistic_s {
     uint8_t min_link_quality;
 } statistic_t;
 
-static statistic_t stats;
+typedef struct radioControls_s {
+    uint8_t left_vertical;
+    uint8_t left_horizontal;
+    uint8_t right_vertical;
+    uint8_t right_horizontal;
+} radioControls_t;
 
+typedef enum radioModes_e {
+    MODE1,
+    MODE2,
+    MODE3,
+    MODE4
+} radioModes_t;
+
+static statistic_t stats;
+#ifdef USE_OSD_STICK_OVERLAY
+static const radioControls_t radioModes[4] = {
+    { PITCH,    YAW,    THROTTLE,   ROLL }, // Mode 1
+    { THROTTLE, YAW,    PITCH,      ROLL }, // Mode 2
+    { PITCH,    ROLL,   THROTTLE,   YAW  }, // Mode 3
+    { THROTTLE, ROLL,   PITCH,      YAW  }, // Mode 4
+};
+#endif
 timeUs_t resumeRefreshAt = 0;
 #define REFRESH_1S    1000 * 1000
 
 static uint8_t armState;
 static bool lastArmState;
-
+#ifdef USE_OSD_PROFILES
+static uint8_t osdProfile = 1;
+#endif
 static displayPort_t *osdDisplayPort;
 
 static bool suppressStatsDisplay = false;
@@ -224,7 +256,7 @@ static const uint8_t osdElementDisplayOrder[] = {
 #endif
 };
 
-PG_REGISTER_WITH_RESET_FN(osdConfig_t, osdConfig, PG_OSD_CONFIG, 3);
+PG_REGISTER_WITH_RESET_FN(osdConfig_t, osdConfig, PG_OSD_CONFIG, 4);
 
 /**
  * Gets the correct altitude symbol for the current unit system
@@ -239,21 +271,13 @@ static char osdGetMetersToSelectedUnitSymbol(void)
     }
 }
 
-/**
- * Gets average battery cell voltage in 0.01V units.
- */
-static int osdGetBatteryAverageCellVoltage(void)
-{
-    return (getBatteryVoltage() * 10) / getBatteryCellCount();
-}
-
 static char osdGetBatterySymbol(int cellVoltage)
 {
     if (getBatteryState() == BATTERY_CRITICAL) {
         return SYM_MAIN_BATT; // FIXME: currently the BAT- symbol, ideally replace with a battery with exclamation mark
     } else {
         // Calculate a symbol offset using cell voltage over full cell voltage range
-        const int symOffset = scaleRange(cellVoltage, batteryConfig()->vbatmincellvoltage * 10, batteryConfig()->vbatmaxcellvoltage * 10, 0, 7);
+        const int symOffset = scaleRange(cellVoltage, batteryConfig()->vbatmincellvoltage, batteryConfig()->vbatmaxcellvoltage, 0, 8);
         return SYM_BATT_EMPTY - constrain(symOffset, 0, 6);
     }
 }
@@ -470,6 +494,35 @@ bool osdWarnGetState(uint8_t warningIndex)
     return osdConfig()->enabledWarnings & (1 << warningIndex);
 }
 
+#ifdef USE_OSD_PROFILES
+void setOsdProfile(uint8_t value)
+{
+    // 1 ->> 001
+    // 2 ->> 010
+    // 3 ->> 100
+    if (value <= OSD_PROFILE_COUNT) {
+        if (value == 0) {
+            osdProfile = 1;
+        } else {
+            osdProfile = 1 << (value - 1);
+        }
+    }
+ }
+
+uint8_t getCurrentOsdProfileIndex(void)
+{
+    return osdConfig()->osdProfileIndex;
+}
+
+void changeOsdProfileIndex(uint8_t profileIndex)
+{
+    if (profileIndex <= OSD_PROFILE_COUNT) {
+        osdConfigMutable()->osdProfileIndex = profileIndex;
+        setOsdProfile(profileIndex);
+    }
+}
+#endif
+
 static bool osdDrawSingleElement(uint8_t item)
 {
     if (!VISIBLE(osdConfig()->item_pos[item]) || BLINK(item)) {
@@ -483,25 +536,46 @@ static bool osdDrawSingleElement(uint8_t item)
     switch (item) {
     case OSD_FLIP_ARROW: 
         {
-            const int angleR = attitude.values.roll / 10;
-            const int angleP = attitude.values.pitch / 10; // still gotta update all angleR and angleP pointers.
-            if (isFlipOverAfterCrashActive()) {
-                if (angleP > 0 && ((angleR > 175 && angleR < 180) || (angleR > -180 && angleR < -175))) {
-                    buff[0] = SYM_ARROW_SOUTH;
-                } else if (angleP > 0 && angleR > 0 && angleR < 175) {
-                    buff[0] = (SYM_ARROW_EAST + 2);
-                } else if (angleP > 0 && angleR < 0 && angleR > -175) {
-                    buff[0] = (SYM_ARROW_WEST + 2);
-                } else if (angleP <= 0 && ((angleR > 175 && angleR < 180) || (angleR > -180 && angleR < -175))) {
-                    buff[0] = SYM_ARROW_NORTH;
-                } else if (angleP <= 0 && angleR > 0 && angleR < 175) {
-                    buff[0] = (SYM_ARROW_NORTH + 2);
-                } else if (angleP <= 0 && angleR < 0 && angleR > -175) {
-                    buff[0] = (SYM_ARROW_SOUTH + 2);
+            int rollAngle = attitude.values.roll / 10;
+            const int pitchAngle = attitude.values.pitch / 10;
+            if (abs(rollAngle) > 90) {
+                rollAngle = (rollAngle < 0 ? -180 : 180) - rollAngle;
+            }
+
+            if ((isFlipOverAfterCrashActive() || (!ARMING_FLAG(ARMED) && !STATE(SMALL_ANGLE))) && !((imuConfig()->small_angle < 180) && STATE(SMALL_ANGLE)) && (rollAngle || pitchAngle)) {
+                if (abs(pitchAngle) < 2 * abs(rollAngle) && abs(rollAngle) < 2 * abs(pitchAngle)) {
+                    if (pitchAngle > 0) {
+                        if (rollAngle > 0) {
+                            buff[0] = SYM_ARROW_WEST + 2;
+                        } else {
+                            buff[0] = SYM_ARROW_EAST - 2;
+                        }
+                    } else {
+                        if (rollAngle > 0) {
+                            buff[0] = SYM_ARROW_WEST - 2;
+                        } else {
+                            buff[0] = SYM_ARROW_EAST + 2;
+                        }
+                    }
+                } else {
+                    if (abs(pitchAngle) > abs(rollAngle)) {
+                        if (pitchAngle > 0) {
+                            buff[0] = SYM_ARROW_SOUTH;
+                        } else {
+                            buff[0] = SYM_ARROW_NORTH;
+                        }
+                    } else {
+                        if (rollAngle > 0) {
+                            buff[0] = SYM_ARROW_WEST;
+                        } else {
+                            buff[0] = SYM_ARROW_EAST;
+                        }
+                    }
                 }
             } else {
                 buff[0] = ' ';
             }
+            
             buff[1] = '\0';
             break;
         }
@@ -531,8 +605,8 @@ static bool osdDrawSingleElement(uint8_t item)
 #endif
 
     case OSD_MAIN_BATT_VOLTAGE:
-        buff[0] = osdGetBatterySymbol(osdGetBatteryAverageCellVoltage());
-        tfp_sprintf(buff + 1, "%2d.%1d%c", getBatteryVoltage() / 10, getBatteryVoltage() % 10, SYM_VOLT);
+        buff[0] = osdGetBatterySymbol(getBatteryAverageCellVoltage());
+        tfp_sprintf(buff + 1, "%2d.%02d%c", getBatteryVoltage() / 100, getBatteryVoltage() % 100, SYM_VOLT);
         break;
 
     case OSD_CURRENT_DRAW:
@@ -605,7 +679,7 @@ static bool osdDrawSingleElement(uint8_t item)
         }
         break;
 
-    case OSD_TOTAL_DIST:
+    case OSD_FLIGHT_DIST:
         if (STATE(GPS_FIX) && STATE(GPS_FIX_HOME)) {
             const int32_t distance = osdGetMetersToSelectedUnit(GPS_distanceFlownInCm / 100);
             tfp_sprintf(buff, "%d%c", distance, osdGetMetersToSelectedUnitSymbol());
@@ -689,18 +763,19 @@ static bool osdDrawSingleElement(uint8_t item)
         }
 		
     case OSD_MOTOR_DIAG:
-        if(areMotorsRunning()) {
-            int maxIdx = 0;
+        {
             int i = 0;
-            for(; i < getMotorCount(); i++) {
-                if(motor[i] > motor[maxIdx]) {
-                    maxIdx = i;
+            const bool motorsRunning = areMotorsRunning();
+            for (; i < getMotorCount(); i++) {
+                if (motorsRunning) {
+                    buff[i] =  0x88 - scaleRange(motor[i], motorOutputLow, motorOutputHigh, 0, 8);
+                } else {
+                    buff[i] =  0x88;
                 }
-                buff[i] =  0x88 - scaleRange(motor[i], motorOutputLow, motorOutputHigh, 0, 8);
             }
             buff[i] = '\0';
+            break;
         }
-        break;
 
     case OSD_CRAFT_NAME:
         // This does not strictly support iterative updating if the craft name changes at run time. But since the craft name is not supposed to be changing this should not matter, and blanking the entire length of the craft name string on update will make it impossible to configure elements to be displayed on the right hand side of the craft name.
@@ -725,7 +800,7 @@ static bool osdDrawSingleElement(uint8_t item)
     case OSD_THROTTLE_POS:
         buff[0] = SYM_THR;
         buff[1] = SYM_THR1;
-        tfp_sprintf(buff + 2, "%3d", (constrain(rcData[THROTTLE], PWM_RANGE_MIN, PWM_RANGE_MAX) - PWM_RANGE_MIN) * 100 / (PWM_RANGE_MAX - PWM_RANGE_MIN));
+        tfp_sprintf(buff + 2, "%3d", calculateThrottlePercent());
         break;
 
 #if defined(USE_VTX_COMMON)
@@ -812,7 +887,7 @@ static bool osdDrawSingleElement(uint8_t item)
         break;
 
     case OSD_POWER:
-        tfp_sprintf(buff, "%4dW", getAmperage() * getBatteryVoltage() / 1000);
+        tfp_sprintf(buff, "%4dW", getAmperage() * getBatteryVoltage() / 10000);
         break;
 
     case OSD_PIDRATE_PROFILE:
@@ -890,11 +965,43 @@ static bool osdDrawSingleElement(uint8_t item)
                 break;
             }
 
+            // Warn when in flip over after crash mode
+            if (osdWarnGetState(OSD_WARNING_CRASH_FLIP) && isFlipOverAfterCrashActive()) {
+                osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, "CRASH FLIP");
+                break;
+            }
+
+#ifdef USE_LAUNCH_CONTROL
+            // Warn when in launch control mode
+            if (osdWarnGetState(OSD_WARNING_LAUNCH_CONTROL) && isLaunchControlActive()) {
+                if (sensors(SENSOR_ACC)) {
+                    char launchControlMsg[OSD_FORMAT_MESSAGE_BUFFER_SIZE];
+                    const int pitchAngle = constrain((attitude.raw[FD_PITCH] - accelerometerConfig()->accelerometerTrims.raw[FD_PITCH]) / 10, -90, 90);
+                    tfp_sprintf(launchControlMsg, "LAUNCH %d", pitchAngle);
+                    osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, launchControlMsg);
+                } else {
+                    osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, "LAUNCH");
+                }
+                break;
+            }
+#endif
+
             if (osdWarnGetState(OSD_WARNING_BATTERY_CRITICAL) && batteryState == BATTERY_CRITICAL) {
                 osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, " LAND NOW");
                 SET_BLINK(OSD_WARNINGS);
                 break;
             }
+
+#ifdef USE_GPS_RESCUE
+            if (osdWarnGetState(OSD_WARNING_GPS_RESCUE_UNAVAILABLE) &&
+               ARMING_FLAG(ARMED) &&
+               gpsRescueIsConfigured() &&
+               !isGPSRescueAvailable()) {
+                osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, "NO GPS RESC");
+                SET_BLINK(OSD_WARNINGS);
+                break;
+            }
+#endif
 
             // Show warning if in HEADFREE flight mode
             if (FLIGHT_MODE(HEADFREE_MODE)) {
@@ -967,27 +1074,6 @@ static bool osdDrawSingleElement(uint8_t item)
             }
 #endif
 
-            // Warn when in flip over after crash mode
-            if (osdWarnGetState(OSD_WARNING_CRASH_FLIP) && isFlipOverAfterCrashActive()) {
-                osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, "CRASH FLIP");
-                break;
-            }
-
-#ifdef USE_LAUNCH_CONTROL
-            // Warn when in launch control mode
-            if (osdWarnGetState(OSD_WARNING_LAUNCH_CONTROL) && isLaunchControlActive()) {
-                if (sensors(SENSOR_ACC)) {
-                    char launchControlMsg[OSD_FORMAT_MESSAGE_BUFFER_SIZE];
-                    const int pitchAngle = constrain((attitude.raw[FD_PITCH] - accelerometerConfig()->accelerometerTrims.raw[FD_PITCH]) / 10, -90, 90);
-                    tfp_sprintf(launchControlMsg, "LAUNCH %d", pitchAngle);
-                    osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, launchControlMsg);
-                } else {
-                    osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, "LAUNCH");
-                }
-                break;
-            }
-#endif
-
             if (osdWarnGetState(OSD_WARNING_BATTERY_WARNING) && batteryState == BATTERY_WARNING) {
                 osdFormatMessage(buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, "LOW BATTERY");
                 SET_BLINK(OSD_WARNINGS);
@@ -1022,7 +1108,7 @@ static bool osdDrawSingleElement(uint8_t item)
 
     case OSD_AVG_CELL_VOLTAGE:
         {
-            const int cellV = osdGetBatteryAverageCellVoltage();
+            const int cellV = getBatteryAverageCellVoltage();
             buff[0] = osdGetBatterySymbol(cellV);
             tfp_sprintf(buff + 1, "%d.%02d%c", cellV / 100, cellV % 100, SYM_VOLT);
             break;
@@ -1145,6 +1231,58 @@ static bool osdDrawSingleElement(uint8_t item)
     return true;
 }
 
+#ifdef USE_OSD_STICK_OVERLAY
+static void osdDrawStickOverlayAxis(uint8_t xpos, uint8_t ypos)
+{
+
+    for (unsigned x = 0; x < OSD_STICK_OVERLAY_WIDTH; x++) {
+        for (unsigned  y = 0; y < OSD_STICK_OVERLAY_HEIGHT; y++) {
+            // draw the axes, vertical and horizonal
+            if ((x == ((OSD_STICK_OVERLAY_WIDTH - 1) / 2)) && (y == (OSD_STICK_OVERLAY_HEIGHT - 1) / 2)) {
+                displayWriteChar(osdDisplayPort, xpos + x, ypos + y, STICK_OVERLAY_CROSS_CHAR);
+            } else if (x == ((OSD_STICK_OVERLAY_WIDTH - 1) / 2)) {
+                displayWriteChar(osdDisplayPort, xpos + x, ypos + y, STICK_OVERLAY_VERTICAL_CHAR);
+            } else if (y == ((OSD_STICK_OVERLAY_HEIGHT - 1) / 2)) {
+                displayWriteChar(osdDisplayPort, xpos + x, ypos + y, STICK_OVERLAY_HORIZONTAL_CHAR);
+            }
+        }
+    }
+}
+
+static void osdDrawStickOverlayAxisItem(osd_items_e osd_item)
+{
+    osdDrawStickOverlayAxis(OSD_X(osdConfig()->item_pos[osd_item]),
+                            OSD_Y(osdConfig()->item_pos[osd_item]));
+}
+
+static void osdDrawStickOverlayPos(osd_items_e osd_item, uint8_t xpos, uint8_t ypos)
+{
+
+    uint8_t elemPosX = OSD_X(osdConfig()->item_pos[osd_item]);
+    uint8_t elemPosY = OSD_Y(osdConfig()->item_pos[osd_item]);
+
+    displayWriteChar(osdDisplayPort, elemPosX + xpos, elemPosY + ypos, STICK_OVERLAY_CURSOR_CHAR);
+}
+
+static void osdDrawStickOverlayCursor(osd_items_e osd_item)
+{
+    rc_alias_e vertical_channel, horizontal_channel;
+
+    if (osd_item == OSD_STICK_OVERLAY_LEFT) {
+        vertical_channel = radioModes[osdConfig()->overlay_radio_mode-1].left_vertical;
+        horizontal_channel = radioModes[osdConfig()->overlay_radio_mode-1].left_horizontal;
+    } else {
+        vertical_channel = radioModes[osdConfig()->overlay_radio_mode-1].right_vertical;
+        horizontal_channel = radioModes[osdConfig()->overlay_radio_mode-1].right_horizontal;
+    }
+
+    uint8_t x_pos =  (uint8_t)scaleRange(constrain(rcData[horizontal_channel], PWM_RANGE_MIN, PWM_RANGE_MAX), PWM_RANGE_MIN, PWM_RANGE_MAX, 0, OSD_STICK_OVERLAY_WIDTH);
+    uint8_t y_pos =  (uint8_t)scaleRange(PWM_RANGE_MAX - constrain(rcData[vertical_channel], PWM_RANGE_MIN, PWM_RANGE_MAX), PWM_RANGE_MIN, PWM_RANGE_MAX, 0, OSD_STICK_OVERLAY_HEIGHT) + OSD_STICK_OVERLAY_HEIGHT - 1;
+
+    osdDrawStickOverlayPos(osd_item, x_pos, y_pos);
+}
+#endif
+
 static void osdDrawElements(void)
 {
     displayClearScreen(osdDisplayPort);
@@ -1181,7 +1319,7 @@ static void osdDrawElements(void)
         osdDrawSingleElement(OSD_GPS_LON);
         osdDrawSingleElement(OSD_HOME_DIST);
         osdDrawSingleElement(OSD_HOME_DIR);
-        osdDrawSingleElement(OSD_TOTAL_DIST);
+        osdDrawSingleElement(OSD_FLIGHT_DIST);
     }
 #endif // GPS
 
@@ -1197,6 +1335,18 @@ static void osdDrawElements(void)
         osdDrawSingleElement(OSD_LOG_STATUS);
     }
 #endif
+
+#ifdef USE_OSD_STICK_OVERLAY
+    if (VISIBLE(osdConfig()->item_pos[OSD_STICK_OVERLAY_LEFT])) {
+        osdDrawStickOverlayAxisItem(OSD_STICK_OVERLAY_LEFT);
+        osdDrawStickOverlayCursor(OSD_STICK_OVERLAY_LEFT);
+    }
+
+    if (VISIBLE(osdConfig()->item_pos[OSD_STICK_OVERLAY_RIGHT])) {
+        osdDrawStickOverlayAxisItem(OSD_STICK_OVERLAY_RIGHT);
+        osdDrawStickOverlayCursor(OSD_STICK_OVERLAY_RIGHT);
+    }
+#endif
 }
 
 void pgResetFn_osdConfig(osdConfig_t *osdConfig)
@@ -1207,7 +1357,7 @@ void pgResetFn_osdConfig(osdConfig_t *osdConfig)
     }
 
     // Always enable warnings elements by default
-    osdConfig->item_pos[OSD_WARNINGS] = OSD_POS(9, 10) | VISIBLE_FLAG;
+    osdConfig->item_pos[OSD_WARNINGS] = OSD_POS(9, 10) | OSD_PROFILE_1_FLAG;
 
     // Default to old fixed positions for these elements
     osdConfig->item_pos[OSD_CROSSHAIRS]         = OSD_POS(13, 6);
@@ -1235,6 +1385,8 @@ void pgResetFn_osdConfig(osdConfig_t *osdConfig)
     osdConfig->timers[OSD_TIMER_1] = OSD_TIMER(OSD_TIMER_SRC_ON, OSD_TIMER_PREC_SECOND, 10);
     osdConfig->timers[OSD_TIMER_2] = OSD_TIMER(OSD_TIMER_SRC_TOTAL_ARMED, OSD_TIMER_PREC_SECOND, 10);
 
+    osdConfig->overlay_radio_mode = 2;
+
     osdConfig->rssi_alarm = 20;
     osdConfig->cap_alarm  = 2200;
     osdConfig->alt_alarm  = 100; // meters or feet depend on configuration
@@ -1245,6 +1397,8 @@ void pgResetFn_osdConfig(osdConfig_t *osdConfig)
 
     osdConfig->ahMaxPitch = 20; // 20 degrees
     osdConfig->ahMaxRoll = 40; // 40 degrees
+
+    osdConfig->osdProfileIndex = 1;
     osdConfig->ahInvert = false;
 }
 
@@ -1300,6 +1454,9 @@ void osdInit(displayPort_t *osdDisplayPortToUse)
     displayResync(osdDisplayPort);
 
     resumeRefreshAt = micros() + (4 * REFRESH_1S);
+#ifdef USE_OSD_PROFILES
+    changeOsdProfileIndex(osdConfig()->osdProfileIndex);
+#endif
 }
 
 bool osdInitialized(void)
@@ -1327,11 +1484,13 @@ void osdUpdateAlarms(void)
         SET_BLINK(OSD_AVG_CELL_VOLTAGE);
     }
 
-    if (STATE(GPS_FIX) == 0) {
+#ifdef USE_GPS
+    if ((STATE(GPS_FIX) == 0) || (gpsSol.numSat < 5) || ((gpsSol.numSat < gpsRescueConfig()->minSats) && gpsRescueIsConfigured())) {
         SET_BLINK(OSD_GPS_SATS);
     } else {
         CLR_BLINK(OSD_GPS_SATS);
     }
+#endif //USE_GPS
 
     for (int i = 0; i < OSD_TIMER_COUNT; i++) {
         const uint16_t timer = osdConfig()->timers[i];
@@ -1392,7 +1551,7 @@ static void osdResetStats(void)
 {
     stats.max_current  = 0;
     stats.max_speed    = 0;
-    stats.min_voltage  = 500;
+    stats.min_voltage  = 5000;
     stats.min_rssi     = 99; // percent
     stats.max_altitude = 0;
     stats.max_distance = 0;
@@ -1581,17 +1740,17 @@ static void osdShowStats(uint16_t endBatteryVoltage)
 #endif
 
     if (osdStatGetState(OSD_STAT_MIN_BATTERY)) {
-        tfp_sprintf(buff, "%d.%1d%c", stats.min_voltage / 10, stats.min_voltage % 10, SYM_VOLT);
+        tfp_sprintf(buff, "%d.%02d%c", stats.min_voltage / 100, stats.min_voltage % 100, SYM_VOLT);
         osdDisplayStatisticLabel(top++, "MIN BATTERY", buff);
     }
 
     if (osdStatGetState(OSD_STAT_END_BATTERY)) {
-        tfp_sprintf(buff, "%d.%1d%c", endBatteryVoltage / 10, endBatteryVoltage % 10, SYM_VOLT);
+        tfp_sprintf(buff, "%d.%02d%c", endBatteryVoltage / 100, endBatteryVoltage % 100, SYM_VOLT);
         osdDisplayStatisticLabel(top++, "END BATTERY", buff);
     }
 
     if (osdStatGetState(OSD_STAT_BATTERY)) {
-        tfp_sprintf(buff, "%d.%1d%c", getBatteryVoltage() / 10, getBatteryVoltage() % 10, SYM_VOLT);
+        tfp_sprintf(buff, "%d.%02d%c", getBatteryVoltage() / 100, getBatteryVoltage() % 100, SYM_VOLT);
         osdDisplayStatisticLabel(top++, "BATTERY", buff);
     }
 
@@ -1658,10 +1817,22 @@ static void osdShowStats(uint16_t endBatteryVoltage)
 #endif
 
 #ifdef USE_GPS
-    if (osdStatGetState(OSD_STAT_TOTAL_DISTANCE) && featureIsEnabled(FEATURE_GPS)) {
+    if (osdStatGetState(OSD_STAT_FLIGHT_DISTANCE) && featureIsEnabled(FEATURE_GPS)) {
         const uint32_t distanceFlown = GPS_distanceFlownInCm / 100;
         tfp_sprintf(buff, "%d%c", osdGetMetersToSelectedUnit(distanceFlown), osdGetMetersToSelectedUnitSymbol());
-        osdDisplayStatisticLabel(top++, "TOTAL DISTANCE", buff);
+        osdDisplayStatisticLabel(top++, "FLIGHT DISTANCE", buff);
+    }
+#endif
+
+#if (!defined(SIMULATOR_BUILD) && !defined(UNIT_TEST)  && defined(USE_GYRO_DATA_ANALYSE))
+    if (osdStatGetState(OSD_STAT_MAX_FFT) && featureIsEnabled(FEATURE_DYNAMIC_FILTER)) {
+        int value = getMaxFFT();
+        if (value > 0) {
+            tfp_sprintf(buff, "%dHZ", value);
+            osdDisplayStatisticLabel(top++, "PEAK FFT", buff);
+        } else {
+            osdDisplayStatisticLabel(top++, "PEAK FFT", "THRT<20%");
+        }
     }
 #endif
 
@@ -1826,4 +1997,11 @@ void osdSuppressStats(bool flag)
 {
     suppressStatsDisplay = flag;
 }
+
+#ifdef USE_OSD_PROFILES
+bool osdElementVisible(uint16_t value)
+{
+    return (bool)((((value & OSD_PROFILE_MASK) >> OSD_PROFILE_BITS_POS) & osdProfile) != 0);
+}
+#endif
 #endif // USE_OSD

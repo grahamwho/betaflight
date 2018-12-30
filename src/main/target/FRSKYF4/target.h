@@ -51,8 +51,8 @@
 #define USE_BARO
 #define USE_BARO_BMP280
 #define USE_BARO_SPI_BMP280
-#define BMP280_SPI_INSTANCE     SPI3
-#define BMP280_CS_PIN           PB3
+#define BARO_SPI_INSTANCE       SPI3
+#define BARO_CS_PIN             PB3
 
 #define USE_MAX7456
 #define MAX7456_SPI_INSTANCE    SPI3
@@ -68,8 +68,7 @@
 #define SDCARD_DETECT_PIN               PB7
 #define SDCARD_SPI_INSTANCE             SPI2
 #define SDCARD_SPI_CS_PIN               SPI2_NSS_PIN
-#define SDCARD_DMA_CHANNEL_TX               DMA1_Stream4
-#define SDCARD_DMA_CHANNEL                  0
+#define SPI2_TX_DMA_OPT                     0     // DMA 1 Stream 4 Channel 0
 
 #define USE_VCP
 #define USE_USB_DETECT

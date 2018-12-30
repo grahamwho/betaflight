@@ -151,8 +151,8 @@
 
 #if defined(AIRBOTF4) || defined(AIRBOTF4SD)
 #define USE_BARO_SPI_BMP280
-#define BMP280_SPI_INSTANCE     SPI1
-#define BMP280_CS_PIN           PC13
+#define BARO_SPI_INSTANCE       SPI1
+#define BARO_CS_PIN             PC13
 #endif
 
 #if defined(AIRBOTF4SD)
@@ -164,8 +164,7 @@
 #define SDCARD_DETECT_PIN       PC0
 #define SDCARD_SPI_INSTANCE     SPI3
 #define SDCARD_SPI_CS_PIN       SPI3_NSS_PIN
-#define SDCARD_DMA_CHANNEL_TX               DMA1_Stream5
-#define SDCARD_DMA_CHANNEL                  0
+#define SPI3_TX_DMA_OPT                     0     // DMA 1 Stream 5 Channel 0
 
 #else
 

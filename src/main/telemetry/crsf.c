@@ -112,7 +112,7 @@ bool handleCrsfMspFrameBuffer(uint8_t payloadSize, mspResponseFnPtr responseFn)
     int pos = 0;
     while (true) {
         const int mspFrameLength = mspRxBuffer.bytes[pos];
-        if (handleMspFrame(&mspRxBuffer.bytes[CRSF_MSP_LENGTH_OFFSET + pos], mspFrameLength)) {
+        if (handleMspFrame(&mspRxBuffer.bytes[CRSF_MSP_LENGTH_OFFSET + pos], mspFrameLength, NULL)) {
             requestHandled |= sendMspReply(payloadSize, responseFn);
         }
         pos += CRSF_MSP_LENGTH_OFFSET + mspFrameLength;
@@ -201,9 +201,9 @@ void crsfFrameBatterySensor(sbuf_t *dst)
     sbufWriteU8(dst, CRSF_FRAME_BATTERY_SENSOR_PAYLOAD_SIZE + CRSF_FRAME_LENGTH_TYPE_CRC);
     sbufWriteU8(dst, CRSF_FRAMETYPE_BATTERY_SENSOR);
     if (telemetryConfig()->report_cell_voltage) {
-        sbufWriteU16BigEndian(dst, getBatteryAverageCellVoltage()); // vbat is in units of 0.1V
+        sbufWriteU16BigEndian(dst, (getBatteryAverageCellVoltage() + 5) / 10); // vbat is in units of 0.01V
     } else {
-        sbufWriteU16BigEndian(dst, getBatteryVoltage());
+        sbufWriteU16BigEndian(dst, getLegacyBatteryVoltage());
     }
     sbufWriteU16BigEndian(dst, getAmperage() / 10);
     const uint32_t mAhDrawn = getMAhDrawn();
@@ -446,15 +446,17 @@ void initCrsfTelemetry(void)
 #endif
 
     int index = 0;
-    if (sensors(SENSOR_ACC)) {
+    if (sensors(SENSOR_ACC) && telemetryIsSensorEnabled(SENSOR_PITCH | SENSOR_ROLL | SENSOR_HEADING)) {
         crsfSchedule[index++] = BV(CRSF_FRAME_ATTITUDE_INDEX);
     }
-    if (isBatteryVoltageConfigured() || isAmperageConfigured()) {
+    if ((isBatteryVoltageConfigured() && telemetryIsSensorEnabled(SENSOR_VOLTAGE))
+        || (isAmperageConfigured() && telemetryIsSensorEnabled(SENSOR_CURRENT | SENSOR_FUEL))) {
         crsfSchedule[index++] = BV(CRSF_FRAME_BATTERY_SENSOR_INDEX);
     }
     crsfSchedule[index++] = BV(CRSF_FRAME_FLIGHT_MODE_INDEX);
 #ifdef USE_GPS
-    if (featureIsEnabled(FEATURE_GPS)) {
+    if (featureIsEnabled(FEATURE_GPS)
+       && telemetryIsSensorEnabled(SENSOR_ALTITUDE | SENSOR_LAT_LONG | SENSOR_GROUND_SPEED | SENSOR_HEADING)) {
         crsfSchedule[index++] = BV(CRSF_FRAME_GPS_INDEX);
     }
 #endif

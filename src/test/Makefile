@@ -37,7 +37,11 @@ arming_prevention_unittest_SRC := \
 		$(USER_DIR)/fc/rc_controls.c \
 		$(USER_DIR)/fc/rc_modes.c \
 		$(USER_DIR)/fc/runtime_config.c \
+		$(USER_DIR)/flight/gps_rescue.c \
 		$(USER_DIR)/common/bitarray.c
+
+arming_prevention_unittest_DEFINES := \
+            USE_GPS_RESCUE=
 
 atomic_unittest_SRC := \
 		$(USER_DIR)/build/atomic.c \
@@ -279,9 +283,8 @@ telemetry_ibus_unittest_SRC := \
 
 timer_definition_unittest_EXPAND := yes
 
-# NERO and STM32F7X2 are universal targets with dynamic timer management.
 # SITL is a simulator with empty timerHardware and many hearders in target.c.
-timer_definition_unittest_BLACKLIST := NERO SITL STM32F7X2
+timer_definition_unittest_BLACKLIST := SITL
 
 timer_definition_unittest_SRC = \
 		$(TARGET_DIR)/$(call get_base_target,$1)/target.c
@@ -348,6 +351,13 @@ vtx_unittest_DEFINES := \
 		USE_VTX_COMMON= \
 		USE_VTX_CONTROL= \
 		USE_VTX_SMARTAUDIO=
+
+rx_spi_spektrum_unittest_SRC := \
+		$(USER_DIR)/rx/cyrf6936_spektrum.c
+
+rx_spi_spektrum_unittest_DEFINES := \
+		USE_RX_SPI \
+		USE_RX_SPEKTRUM
 
 # Please tweak the following variable definitions as needed by your
 # project, except GTEST_HEADERS, which you can use in your own targets

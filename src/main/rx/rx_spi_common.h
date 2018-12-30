@@ -20,4 +20,20 @@
 
 #pragma once
 
-bool l3gd20Detect(gyroDev_t *gyro);
+#include "rx/rx_spi.h"
+
+#define INTERVAL_RX_LOSS_MS 1000
+#define INTERVAL_RX_BIND_MS 250
+#define RX_LOSS_COUNT 1000
+
+void rxSpiCommonIOInit(const rxSpiConfig_t *rxSpiConfig);
+
+void rxSpiLedOn(void);
+void rxSpiLedOff(void);
+void rxSpiLedToggle(void);
+void rxSpiLedBlink(timeMs_t blinkMs);
+void rxSpiLedBlinkRxLoss(rx_spi_received_e result);
+void rxSpiLedBlinkBind(void);
+
+void rxSpiBind(void);
+bool rxSpiCheckBindRequested(bool reset);

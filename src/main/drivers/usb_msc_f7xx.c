@@ -45,6 +45,7 @@
 
 #include "drivers/accgyro/accgyro_mpu.h"
 
+#include "pg/sdcard.h"
 #include "pg/usb.h"
 
 #include "vcp_hal/usbd_cdc_interface.h"
@@ -88,7 +89,20 @@ uint8_t mscStart(void)
     switch (blackboxConfig()->device) {
 #ifdef USE_SDCARD
     case BLACKBOX_DEVICE_SDCARD:
-        USBD_MSC_RegisterStorage(&USBD_Device, &USBD_MSC_MICRO_SDIO_fops);
+        switch (sdcardConfig()->mode) {
+#ifdef USE_SDCARD_SDIO
+        case SDCARD_MODE_SDIO:
+            USBD_MSC_RegisterStorage(&USBD_Device, &USBD_MSC_MICRO_SDIO_fops);
+            break;
+#endif
+#ifdef USE_SDCARD_SPI
+        case SDCARD_MODE_SPI:
+            USBD_MSC_RegisterStorage(&USBD_Device, &USBD_MSC_MICRO_SD_SPI_fops);
+            break;
+#endif
+        default:
+            return 1;
+        }
         break;
 #endif
 
@@ -150,11 +164,18 @@ void mscWaitForButton(void)
     }
 }
 
-void systemResetToMsc(void)
+void systemResetToMsc(int timezoneOffsetMinutes)
 {
     *((__IO uint32_t*) BKPSRAM_BASE + 16) = MSC_MAGIC;
 
     __disable_irq();
+
+    // Persist the RTC across the reboot to use as the file timestamp
+#ifdef USE_PERSISTENT_MSC_RTC
+    rtcPersistWrite(timezoneOffsetMinutes);
+#else
+    UNUSED(timezoneOffsetMinutes);
+#endif
     NVIC_SystemReset();
 }
 #endif

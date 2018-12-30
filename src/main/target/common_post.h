@@ -56,7 +56,7 @@
 #endif
 #endif
 
-#ifndef USE_BARO
+#if !defined(USE_BARO) && !defined(USE_GPS)
 #undef USE_VARIO
 #endif
 
@@ -126,6 +126,8 @@
 
 #if !defined(USE_OSD)
 #undef USE_RX_LINK_QUALITY_INFO
+#undef USE_OSD_PROFILES
+#undef USE_OSD_STICK_OVERLAY
 #endif
 
 /* If either VTX_CONTROL or VTX_COMMON is undefined then remove common code and device drivers */
@@ -138,13 +140,11 @@
 
 #if defined(USE_RX_FRSKY_SPI_D) || defined(USE_RX_FRSKY_SPI_X)
 #define USE_RX_CC2500
-#define USE_RX_CC2500_BIND
 #define USE_RX_FRSKY_SPI
 #endif
 
 #if defined(USE_RX_SFHSS_SPI)
 #define USE_RX_CC2500
-#define USE_RX_CC2500_BIND
 #endif
 
 // Burst dshot to default off if not configured explicitly by target
@@ -180,7 +180,7 @@
 #endif
 
 #if defined(USE_FLASH_M25P16)
-#define USE_FLASH
+#define USE_FLASH_CHIP
 #endif
 
 #if defined(USE_MAX7456)
@@ -192,15 +192,44 @@
 #endif
 
 // Generate USE_SPI_GYRO or USE_I2C_GYRO
-#if defined(USE_GYRO_L3G4200D) || defined(USE_GYRO_L3GD20) || defined(USE_GYRO_MPU3050) || defined(USE_GYRO_MPU6000) || defined(USE_GYRO_MPU6050) || defined(USE_GYRO_MPU6500)
+#if defined(USE_GYRO_L3G4200D) || defined(USE_GYRO_MPU3050) || defined(USE_GYRO_MPU6000) || defined(USE_GYRO_MPU6050) || defined(USE_GYRO_MPU6500)
 #define USE_I2C_GYRO
 #endif
 
-#if defined(USE_GYRO_SPI_ICM20689) || defined(USE_GYRO_SPI_MPU6000) || defined(USE_GYRO_SPI_MPU6500) || defined(USE_GYRO_SPI_MPU9250)
+#if defined(USE_GYRO_SPI_ICM20689) || defined(USE_GYRO_SPI_MPU6000) || defined(USE_GYRO_SPI_MPU6500) || defined(USE_GYRO_SPI_MPU9250) || defined(USE_GYRO_L3GD20)
 #define USE_SPI_GYRO
 #endif
 
 // CX10 is a special case of SPI RX which requires XN297
 #if defined(USE_RX_CX10)
 #define USE_RX_XN297
+#endif
+
+#ifdef GENERIC_TARGET
+#define USE_CONFIGURATION_STATE
+
+// Setup crystal frequency for backward compatibility
+// Should be set to zero for generic targets and set with CLI variable set system_hse_value.
+#define SYSTEM_HSE_VALUE 0
+#else
+#ifdef TARGET_XTAL_MHZ
+#define SYSTEM_HSE_VALUE TARGET_XTAL_MHZ
+#else
+#define SYSTEM_HSE_VALUE (HSE_VALUE/1000000U)
+#endif
+#endif // GENERIC_TARGET
+
+// Number of pins that needs pre-init
+#ifdef USE_SPI
+#ifndef SPI_PREINIT_COUNT
+#define SPI_PREINIT_COUNT 16 // 2 x 8 (GYROx2, BARO, MAG, MAX, FLASHx2, RX)
+#endif
+#endif
+
+#if (!defined(USE_FLASHFS) || !defined(USE_RTC_TIME) || !defined(USE_USB_MSC))
+#undef USE_PERSISTENT_MSC_RTC
+#endif
+
+#if defined(USE_SERIAL_4WAY_SK_BOOTLOADER) && !defined(USE_SERIAL_4WAY_BLHELI_BOOTLOADER)
+#define USE_SERIAL_4WAY_BLHELI_BOOTLOADER
 #endif

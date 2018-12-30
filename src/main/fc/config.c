@@ -85,7 +85,9 @@ PG_RESET_TEMPLATE(systemConfig_t, systemConfig,
     .task_statistics = true,
     .cpu_overclock = 0,
     .powerOnArmingGraceTime = 5,
-    .boardIdentifier = TARGET_BOARD_IDENTIFIER
+    .boardIdentifier = TARGET_BOARD_IDENTIFIER,
+    .hseMhz = SYSTEM_HSE_VALUE,  // Not used for non-F4 targets
+    .configured = false,
 );
 
 uint8_t getCurrentPidProfileIndex(void)
@@ -127,8 +129,8 @@ static void activateConfig(void)
     resetAdjustmentStates();
 
     pidInit(currentPidProfile);
-    useRcControlsConfig(currentPidProfile);
-    useAdjustmentConfig(currentPidProfile);
+
+    rcControlsInit();
 
     failsafeReset();
     setAccelerationTrims(&accelerometerConfigMutable()->accZero);
@@ -526,15 +528,28 @@ bool readEEPROM(void)
     return success;
 }
 
-void writeEEPROM(void)
+static void ValidateAndWriteConfigToEEPROM(bool setConfigured)
 {
     validateAndFixConfig();
 
     suspendRxPwmPpmSignal();
 
+#ifdef USE_CONFIGURATION_STATE
+    if (setConfigured) {
+        systemConfigMutable()->configured = true;
+    }
+#else
+    UNUSED(setConfigured);
+#endif
+
     writeConfigToEEPROM();
 
     resumeRxPwmPpmSignal();
+}
+
+void writeEEPROM(void)
+{
+    ValidateAndWriteConfigToEEPROM(true);
 }
 
 void writeEEPROMWithFeatures(uint32_t features)
@@ -542,14 +557,14 @@ void writeEEPROMWithFeatures(uint32_t features)
     featureDisableAll();
     featureEnable(features);
 
-    writeEEPROM();
+    ValidateAndWriteConfigToEEPROM(true);
 }
 
 void resetEEPROM(void)
 {
     resetConfigs();
 
-    writeEEPROM();
+    ValidateAndWriteConfigToEEPROM(false);
 
     activateConfig();
 }
@@ -564,7 +579,7 @@ void ensureEEPROMStructureIsValid(void)
 
 void saveConfigAndNotify(void)
 {
-    writeEEPROM();
+    ValidateAndWriteConfigToEEPROM(true);
     readEEPROM();
     beeperConfirmationBeeps(1);
 }
@@ -574,7 +589,18 @@ void changePidProfile(uint8_t pidProfileIndex)
     if (pidProfileIndex < MAX_PROFILE_COUNT) {
         systemConfigMutable()->pidProfileIndex = pidProfileIndex;
         loadPidProfile();
+
+        pidInit(currentPidProfile);
     }
 
     beeperConfirmationBeeps(pidProfileIndex + 1);
+}
+
+bool isSystemConfigured(void)
+{
+#ifdef USE_CONFIGURATION_STATE
+    return systemConfig()->configured;
+#else
+    return true;
+#endif
 }

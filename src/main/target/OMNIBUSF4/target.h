@@ -73,8 +73,6 @@
 
 #define USE_EXTI
 
-#define USE_MULTI_GYRO
-
 #define USE_ACC
 #define USE_ACC_SPI_MPU6000
 
@@ -124,8 +122,8 @@
 #define USE_BARO
 #if defined(OMNIBUSF4SD)
 #define USE_BARO_SPI_BMP280
-#define BMP280_SPI_INSTANCE     SPI3
-#define BMP280_CS_PIN           PB3 // v1
+#define BARO_SPI_INSTANCE       SPI3
+#define BARO_CS_PIN             PB3 // v1
 #endif
 #define USE_BARO_BMP085
 #define USE_BARO_BMP280
@@ -157,8 +155,7 @@
 #define SDCARD_DETECT_PIN               PB7
 #define SDCARD_SPI_INSTANCE             SPI2
 #define SDCARD_SPI_CS_PIN               SPI2_NSS_PIN
-#define SDCARD_DMA_CHANNEL_TX                   DMA1_Stream4
-#define SDCARD_DMA_CHANNEL                      0
+#define SPI2_TX_DMA_OPT                         0     // DMA 1 Stream 4 Channel 0
 
 // For variants with SDcard replaced with flash chip
 #define FLASH_CS_PIN            SDCARD_SPI_CS_PIN
@@ -251,7 +248,9 @@
 
 #define USE_ADC
 #define ADC_INSTANCE            ADC2
+#define ADC2_DMA_OPT            1  // DMA 2 Stream 3 Channel 1 (compat default)
 //#define ADC_INSTANCE            ADC1
+//#define ADC1_DMA_OPT            1  // DMA 2 Stream 4 Channel 0 (compat default)
 
 #define CURRENT_METER_ADC_PIN   PC1  // Direct from CRNT pad (part of onboard sensor for Pro)
 #define VBAT_ADC_PIN            PC2  // 11:1 (10K + 1K) divider
