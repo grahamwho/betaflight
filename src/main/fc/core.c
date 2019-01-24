@@ -279,7 +279,7 @@ void updateArmingStatus(void)
 
 #ifdef USE_GPS_RESCUE
         if (gpsRescueIsConfigured()) {
-            if (!gpsRescueConfig()->minSats || STATE(GPS_FIX) || ARMING_FLAG(WAS_EVER_ARMED)) {
+            if (gpsRescueConfig()->allowArmingWithoutFix || STATE(GPS_FIX) || ARMING_FLAG(WAS_EVER_ARMED)) {
                 unsetArmingDisabled(ARMING_DISABLED_GPS);
             } else {
                 setArmingDisabled(ARMING_DISABLED_GPS);
@@ -382,14 +382,6 @@ void tryArm(void)
         const timeUs_t currentTimeUs = micros();
 
 #ifdef USE_DSHOT
-#ifdef USE_DSHOT_TELEMETRY
-        pwmWriteDshotCommand(
-            255, getMotorCount(),
-            motorConfig()->dev.useDshotTelemetry ?
-            DSHOT_CMD_SIGNAL_LINE_CONTINUOUS_ERPM_TELEMETRY :
-            DSHOT_CMD_SIGNAL_LINE_TELEMETRY_DISABLE, true);
-#endif
-
         if (currentTimeUs - getLastDshotBeaconCommandTimeUs() < DSHOT_BEACON_GUARD_DELAY_US) {
             if (tryingToArm == ARMING_DELAYED_DISARMED) {
                 if (IS_RC_MODE_ACTIVE(BOXFLIPOVERAFTERCRASH)) {
@@ -404,6 +396,15 @@ void tryArm(void)
             }
             return;
         }
+
+#ifdef USE_DSHOT_TELEMETRY
+        if (isMotorProtocolDshot()) {
+            pwmWriteDshotCommand(
+                255, getMotorCount(), motorConfig()->dev.useDshotTelemetry ?
+                DSHOT_CMD_SIGNAL_LINE_CONTINUOUS_ERPM_TELEMETRY : DSHOT_CMD_SIGNAL_LINE_TELEMETRY_DISABLE, false);
+        }
+#endif
+
         if (isMotorProtocolDshot() && isModeActivationConditionPresent(BOXFLIPOVERAFTERCRASH)) {
             if (!(IS_RC_MODE_ACTIVE(BOXFLIPOVERAFTERCRASH) || (tryingToArm == ARMING_DELAYED_CRASHFLIP))) {
                 flipOverAfterCrashActive = false;
@@ -455,10 +456,16 @@ void tryArm(void)
 
         lastArmingDisabledReason = 0;
 
-        //beep to indicate arming
 #ifdef USE_GPS
-        if (featureIsEnabled(FEATURE_GPS) && STATE(GPS_FIX) && gpsSol.numSat >= 5) {
-            beeper(BEEPER_ARMING_GPS_FIX);
+        GPS_reset_home_position();
+
+        //beep to indicate arming
+        if (featureIsEnabled(FEATURE_GPS)) {
+            if (STATE(GPS_FIX) && gpsSol.numSat >= 5) {
+                beeper(BEEPER_ARMING_GPS_FIX);
+            } else {
+                beeper(BEEPER_ARMING_GPS_NO_FIX);
+            }
         } else {
             beeper(BEEPER_ARMING);
         }
@@ -526,7 +533,7 @@ static void updateInflightCalibrationState(void)
 #if defined(USE_GPS) || defined(USE_MAG)
 void updateMagHold(void)
 {
-    if (ABS(rcCommand[YAW]) < 15 && FLIGHT_MODE(MAG_MODE)) {
+    if (fabsf(rcCommand[YAW]) < 15 && FLIGHT_MODE(MAG_MODE)) {
         int16_t dif = DECIDEGREES_TO_DEGREES(attitude.values.yaw) - magHold;
         if (dif <= -180)
             dif += 360;
@@ -669,12 +676,13 @@ bool processRx(timeUs_t currentTimeUs)
     /* In airmode iterm should be prevented to grow when Low thottle and Roll + Pitch Centered.
      This is needed to prevent iterm winding on the ground, but keep full stabilisation on 0 throttle while in air */
     if (throttleStatus == THROTTLE_LOW && !airmodeIsActivated && !launchControlActive) {
-        pidResetIterm();
+        pidSetItermReset(true);
         if (currentPidProfile->pidAtMinThrottle)
             pidStabilisationState(PID_STABILISATION_ON);
         else
             pidStabilisationState(PID_STABILISATION_OFF);
     } else {
+        pidSetItermReset(false);
         pidStabilisationState(PID_STABILISATION_ON);
     }
 
@@ -981,9 +989,9 @@ static FAST_CODE void subTaskPidController(timeUs_t currentTimeUs)
         if (((fabsf(pidData[FD_PITCH].Sum) >= RUNAWAY_TAKEOFF_PIDSUM_THRESHOLD)
             || (fabsf(pidData[FD_ROLL].Sum) >= RUNAWAY_TAKEOFF_PIDSUM_THRESHOLD)
             || (fabsf(pidData[FD_YAW].Sum) >= RUNAWAY_TAKEOFF_PIDSUM_THRESHOLD))
-            && ((ABS(gyroAbsRateDps(FD_PITCH)) > RUNAWAY_TAKEOFF_GYRO_LIMIT_RP)
-                || (ABS(gyroAbsRateDps(FD_ROLL)) > RUNAWAY_TAKEOFF_GYRO_LIMIT_RP)
-                || (ABS(gyroAbsRateDps(FD_YAW)) > RUNAWAY_TAKEOFF_GYRO_LIMIT_YAW))) {
+            && ((gyroAbsRateDps(FD_PITCH) > RUNAWAY_TAKEOFF_GYRO_LIMIT_RP)
+                || (gyroAbsRateDps(FD_ROLL) > RUNAWAY_TAKEOFF_GYRO_LIMIT_RP)
+                || (gyroAbsRateDps(FD_YAW) > RUNAWAY_TAKEOFF_GYRO_LIMIT_YAW))) {
 
             if (runawayTakeoffTriggerUs == 0) {
                 runawayTakeoffTriggerUs = currentTimeUs + RUNAWAY_TAKEOFF_ACTIVATE_DELAY;
@@ -1126,7 +1134,6 @@ FAST_CODE void taskMainPidLoop(timeUs_t currentTimeUs)
         debug[1] = averageSystemLoadPercent;
     }
 }
-
 
 bool isFlipOverAfterCrashActive(void)
 {

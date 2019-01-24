@@ -21,44 +21,9 @@
 #pragma once
 
 #undef USE_DSHOT_DMAR           // OMNIBUS (F3) does not benefit from burst Dshot
-
-// Removed to make the firmware fit into flash (in descending order of priority):
-
-//#undef USE_RC_SMOOTHING_FILTER
-//#undef USE_DYN_LPF
-
-//#undef USE_ITERM_RELAX
-//#undef USE_RC_SMOOTHING_FILTER
-
-#undef USE_HUFFMAN
-#undef USE_PINIO
-#undef USE_PINIOBOX
-
-// My changes
-#undef USE_ACRO_TRAINER
-#undef USE_CAMERA_CONTROL
-#undef USE_VTX_TRAMP
-#undef USE_TELEMETRY_CRSF
-#undef USE_CRSF_CMS_TELEMETRY
-#undef USE_TELEMETRY_SRXL
-#undef USE_SERVOS
-#undef USE_LAUNCH_CONTROL
-#define USE_ABSOLUTE_CONTROL
-
-#undef USE_TELEMETRY_HOTT
-#undef USE_TELEMETRY_MAVLINK
-#undef USE_TELEMETRY_LTM
-#undef USE_SERIALRX_XBUS
-#undef USE_SERIALRX_SUMH
-#undef USE_PWM
-
-
-#undef USE_RTC_TIME
-#undef USE_RX_MSP
-#undef USE_ESC_SENSOR_INFO
+#undef USE_GYRO_OVERFLOW_CHECK
 
 #define TARGET_BOARD_IDENTIFIER "OMNI" // https://en.wikipedia.org/wiki/Omnibus
-
 
 #define LED0_PIN                PB3
 
@@ -191,8 +156,6 @@
 //#define BUTTON_B_PIN            PB0
 
 //#define AVOID_UART3_FOR_PWM_PPM // Disable this for using UART3
-
-#define USE_SERIAL_4WAY_BLHELI_INTERFACE
 
 #define TARGET_IO_PORTA         0xffff
 #define TARGET_IO_PORTB         0xffff

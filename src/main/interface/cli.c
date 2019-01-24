@@ -222,7 +222,7 @@ static const char * const featureNames[] = {
 static const char rxFailsafeModeCharacters[] = "ahs";
 
 static const rxFailsafeChannelMode_e rxFailsafeModesTable[RX_FAILSAFE_TYPE_COUNT][RX_FAILSAFE_MODE_COUNT] = {
-    { RX_FAILSAFE_MODE_AUTO, RX_FAILSAFE_MODE_HOLD, RX_FAILSAFE_MODE_INVALID },
+    { RX_FAILSAFE_MODE_AUTO, RX_FAILSAFE_MODE_HOLD, RX_FAILSAFE_MODE_SET },
     { RX_FAILSAFE_MODE_INVALID, RX_FAILSAFE_MODE_HOLD, RX_FAILSAFE_MODE_SET }
 };
 
@@ -1579,7 +1579,7 @@ static void cliRxRange(char *cmdline)
     }
 }
 
-#ifdef USE_LED_STRIP
+#ifdef USE_LED_STRIP_STATUS_MODE
 static void printLed(uint8_t dumpMask, const ledConfig_t *ledConfigs, const ledConfig_t *defaultLedConfigs)
 {
     const char *format = "led %u %s";
@@ -2622,6 +2622,7 @@ void cliRxSpiBind(char *cmdline){
 #endif
 #if defined(USE_RX_FRSKY_SPI_X)
     case RX_SPI_FRSKY_X:
+    case RX_SPI_FRSKY_X_LBT:
 #endif
 #endif // USE_RX_FRSKY_SPI
 #ifdef USE_RX_SFHSS_SPI
@@ -3765,7 +3766,7 @@ static void cliTasks(char *cmdline)
             int taskFrequency;
             int subTaskFrequency = 0;
             if (taskId == TASK_GYROPID) {
-                subTaskFrequency = taskInfo.latestDeltaTime == 0 ? 0 : (int)(1000000.0f / ((float)taskInfo.latestDeltaTime));
+                subTaskFrequency = taskInfo.movingAverageCycleTime == 0.0f ? 0.0f : (int)(1000000.0f / (taskInfo.movingAverageCycleTime));
                 taskFrequency = subTaskFrequency / pidConfig()->pid_process_denom;
                 if (pidConfig()->pid_process_denom > 1) {
                     cliPrintf("%02d - (%15s) ", taskId, taskInfo.taskName);
@@ -3810,7 +3811,7 @@ static void cliVersion(char *cmdline)
 {
     UNUSED(cmdline);
 
-    cliPrintLinef("# %s / %s (%s) %s %s / %s (%s) MSP API: %s",
+    cliPrintf("# %s / %s (%s) %s %s / %s (%s) MSP API: %s",
         FC_FIRMWARE_NAME,
         targetName,
         systemConfig()->boardIdentifier,
@@ -3820,6 +3821,11 @@ static void cliVersion(char *cmdline)
         shortGitRevision,
         MSP_API_VERSION_STRING
     );
+#ifdef FEATURE_CUT_LEVEL
+    cliPrintLinef(" / FEATURE CUT LEVEL %d", FEATURE_CUT_LEVEL);
+#else
+    cliPrintLinefeed();
+#endif
 }
 
 #ifdef USE_RC_SMOOTHING_FILTER
@@ -4656,7 +4662,7 @@ static void printConfig(char *cmdline, bool doDiff)
         cliPrintHashLine("serial");
         printSerial(dumpMask, &serialConfig_Copy, serialConfig());
 
-#ifdef USE_LED_STRIP
+#ifdef USE_LED_STRIP_STATUS_MODE
         cliPrintHashLine("led");
         printLed(dumpMask, ledStripConfig_Copy.ledConfigs, ledStripConfig()->ledConfigs);
 
@@ -4817,8 +4823,8 @@ const clicmd_t cmdTable[] = {
 #if defined(USE_BOARD_INFO)
     CLI_COMMAND_DEF("board_name", "get / set the name of the board model", "[board name]", cliBoardName),
 #endif
-#ifdef USE_LED_STRIP
-    CLI_COMMAND_DEF("color", "configure colors", NULL, cliColor),
+#ifdef USE_LED_STRIP_STATUS_MODE
+        CLI_COMMAND_DEF("color", "configure colors", NULL, cliColor),
 #endif
     CLI_COMMAND_DEF("defaults", "reset to defaults and reboot", "[nosave]", cliDefaults),
     CLI_COMMAND_DEF("diff", "list configuration changes from default", "[master|profile|rates|all] {defaults}", cliDiff),
@@ -4856,8 +4862,8 @@ const clicmd_t cmdTable[] = {
     CLI_COMMAND_DEF("gyroregisters", "dump gyro config registers contents", NULL, cliDumpGyroRegisters),
 #endif
     CLI_COMMAND_DEF("help", NULL, NULL, cliHelp),
-#ifdef USE_LED_STRIP
-    CLI_COMMAND_DEF("led", "configure leds", NULL, cliLed),
+#ifdef USE_LED_STRIP_STATUS_MODE
+        CLI_COMMAND_DEF("led", "configure leds", NULL, cliLed),
 #endif
 #if defined(USE_BOARD_INFO)
     CLI_COMMAND_DEF("manufacturer_id", "get / set the id of the board manufacturer", "[manufacturer id]", cliManufacturerId),
@@ -4868,7 +4874,7 @@ const clicmd_t cmdTable[] = {
     CLI_COMMAND_DEF("mixer", "configure mixer", "list\r\n\t<name>", cliMixer),
 #endif
     CLI_COMMAND_DEF("mmix", "custom motor mixer", NULL, cliMotorMix),
-#ifdef USE_LED_STRIP
+#ifdef USE_LED_STRIP_STATUS_MODE
     CLI_COMMAND_DEF("mode_color", "configure mode and special colors", NULL, cliModeColor),
 #endif
     CLI_COMMAND_DEF("motor",  "get/set motor", "<index> [<value>]", cliMotor),

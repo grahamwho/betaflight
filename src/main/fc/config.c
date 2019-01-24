@@ -25,6 +25,8 @@
 
 #include "platform.h"
 
+#include "blackbox/blackbox.h"
+
 #include "build/debug.h"
 
 #include "config/config_eeprom.h"
@@ -62,6 +64,8 @@
 #include "sensors/battery.h"
 #include "sensors/gyro.h"
 
+#include "scheduler/scheduler.h"
+
 pidProfile_t *currentPidProfile;
 
 #ifndef RX_SPI_DEFAULT_PROTOCOL
@@ -88,6 +92,7 @@ PG_RESET_TEMPLATE(systemConfig_t, systemConfig,
     .boardIdentifier = TARGET_BOARD_IDENTIFIER,
     .hseMhz = SYSTEM_HSE_VALUE,  // Not used for non-F4 targets
     .configured = false,
+    .schedulerOptimizeRate = false,
 );
 
 uint8_t getCurrentPidProfileIndex(void)
@@ -121,6 +126,7 @@ void resetConfigs(void)
 
 static void activateConfig(void)
 {
+    schedulerOptimizeRate(systemConfig()->schedulerOptimizeRate);
     loadPidProfile();
     loadControlRateProfile();
 
@@ -194,6 +200,13 @@ static void validateAndFixConfig(void)
     if (currentPidProfile->dterm_notch_cutoff >= currentPidProfile->dterm_notch_hz) {
         currentPidProfile->dterm_notch_hz = 0;
     }
+
+#ifdef USE_DYN_LPF
+    //PRevent invalid dynamic lowpass
+    if (currentPidProfile->dyn_lpf_dterm_min_hz > currentPidProfile->dyn_lpf_dterm_max_hz) {
+        currentPidProfile->dyn_lpf_dterm_min_hz = 0;
+    }
+#endif
 
     if (motorConfig()->dev.motorPwmProtocol == PWM_TYPE_BRUSHED) {
         featureDisable(FEATURE_3D);
@@ -432,6 +445,12 @@ void validateAndFixGyroConfig(void)
     if (gyroConfig()->gyro_soft_notch_cutoff_2 >= gyroConfig()->gyro_soft_notch_hz_2) {
         gyroConfigMutable()->gyro_soft_notch_hz_2 = 0;
     }
+#ifdef USE_DYN_LPF
+    //Prevent invalid dynamic lowpass filter
+    if (gyroConfig()->dyn_lpf_gyro_min_hz > gyroConfig()->dyn_lpf_gyro_max_hz) {
+        gyroConfigMutable()->dyn_lpf_gyro_min_hz = 0;
+    }
+#endif
 
     if (gyroConfig()->gyro_hardware_lpf == GYRO_HARDWARE_LPF_1KHZ_SAMPLE) {
         pidConfigMutable()->pid_process_denom = 1; // When gyro set to 1khz always set pid speed 1:1 to sampling speed
@@ -516,6 +535,20 @@ void validateAndFixGyroConfig(void)
             pidConfigMutable()->pid_process_denom = MAX(pidConfigMutable()->pid_process_denom, minPidProcessDenom);
         }
     }
+
+#ifdef USE_BLACKBOX
+#ifndef USE_FLASHFS
+    if (blackboxConfig()->device == 1) {  // BLACKBOX_DEVICE_FLASH (but not defined)
+        blackboxConfigMutable()->device = BLACKBOX_DEVICE_NONE;
+    }
+#endif // USE_FLASHFS
+
+#ifndef USE_SDCARD
+    if (blackboxConfig()->device == 2) {  // BLACKBOX_DEVICE_SDCARD (but not defined)
+        blackboxConfigMutable()->device = BLACKBOX_DEVICE_NONE;
+    }
+#endif // USE_SDCARD
+#endif // USE_BLACKBOX
 }
 
 bool readEEPROM(void)
