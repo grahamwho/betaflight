@@ -167,27 +167,27 @@
 #define USE_YAW_SPIN_RECOVERY
 #define USE_DSHOT_DMAR
 #define USE_SERIALRX_FPORT      // FrSky FPort
-#define USE_TELEMETRY_CRSF
-#define USE_TELEMETRY_SRXL
+//#define USE_TELEMETRY_CRSF
+//#define USE_TELEMETRY_SRXL
 
 #if ((FLASH_SIZE > 256) || (FEATURE_CUT_LEVEL < 12))
 #define USE_CMS
 #define USE_MSP_DISPLAYPORT
 #define USE_MSP_OVER_TELEMETRY
-#define USE_LED_STRIP
+//#define USE_LED_STRIP
 #endif
 
 #if ((FLASH_SIZE > 256) || (FEATURE_CUT_LEVEL < 11))
 #define USE_VTX_COMMON
 #define USE_VTX_CONTROL
 #define USE_VTX_SMARTAUDIO
-#define USE_VTX_TRAMP
+//#define USE_VTX_TRAMP
 #endif
 
 #if ((FLASH_SIZE > 256) || (FEATURE_CUT_LEVEL < 10))
 #define USE_VIRTUAL_CURRENT_METER
-#define USE_CAMERA_CONTROL
-#define USE_ESC_SENSOR
+//#define USE_CAMERA_CONTROL
+//#define USE_ESC_SENSOR
 #define USE_SERIAL_4WAY_BLHELI_BOOTLOADER
 #define USE_RCDEVICE
 #endif
@@ -197,7 +197,7 @@
 #endif
 
 #if ((FLASH_SIZE > 256) || (FEATURE_CUT_LEVEL < 8))
-#define USE_LAUNCH_CONTROL
+//#define USE_LAUNCH_CONTROL
 #define USE_DYN_LPF
 #define USE_D_CUT
 #endif
@@ -215,7 +215,7 @@
 #endif
 
 #if ((FLASH_SIZE > 256) || (FEATURE_CUT_LEVEL < 5))
-#define USE_PWM
+//#define USE_PWM
 #endif
 
 #if ((FLASH_SIZE > 256) || (FEATURE_CUT_LEVEL < 4))
