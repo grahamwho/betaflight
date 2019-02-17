@@ -52,9 +52,6 @@ typedef enum {
     TABLE_RX_SPI,
 #endif
     TABLE_GYRO_HARDWARE_LPF,
-#if defined(USE_32K_CAPABLE_GYRO) && defined(USE_GYRO_DLPF_EXPERIMENTAL)
-    TABLE_GYRO_32KHZ_HARDWARE_LPF,
-#endif
     TABLE_ACC_HARDWARE,
 #ifdef USE_BARO
     TABLE_BARO_HARDWARE,
@@ -179,6 +176,11 @@ typedef struct cliMinMaxConfig_s {
     const int16_t max;
 } cliMinMaxConfig_t;
 
+typedef struct cliMinMaxUnsignedConfig_s {
+    const uint16_t min;
+    const uint16_t max;
+} cliMinMaxUnsignedConfig_t;
+
 typedef struct cliLookupTableConfig_s {
     const lookupTableIndex_e tableIndex;
 } cliLookupTableConfig_t;
@@ -188,11 +190,12 @@ typedef struct cliArrayLengthConfig_s {
 } cliArrayLengthConfig_t;
 
 typedef union {
-    cliLookupTableConfig_t lookup;  // used for MODE_LOOKUP excl. VAR_UINT32
-    cliMinMaxConfig_t minmax;       // used for MODE_DIRECT
-    cliArrayLengthConfig_t array;   // used for MODE_ARRAY
-    uint8_t bitpos;                 // used for MODE_BITSET
-    uint32_t u32_max;               // used for MODE_DIRECT with VAR_UINT32
+    cliLookupTableConfig_t lookup;            // used for MODE_LOOKUP excl. VAR_UINT32
+    cliMinMaxConfig_t minmax;                 // used for MODE_DIRECT with signed parameters
+    cliMinMaxUnsignedConfig_t minmaxUnsigned; // used for MODE_DIRECT with unsigned parameters
+    cliArrayLengthConfig_t array;             // used for MODE_ARRAY
+    uint8_t bitpos;                           // used for MODE_BITSET
+    uint32_t u32Max;               // used for MODE_DIRECT with VAR_UINT32
 } cliValueConfig_t;
 
 typedef struct clivalue_s {

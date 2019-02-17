@@ -151,22 +151,19 @@
 #undef USE_ADC_INTERNAL
 #endif
 
-#if (!defined(USE_SDCARD) && !defined(USE_FLASHFS)) || !(defined(STM32F4) || defined(STM32F7))
+#if (!defined(USE_SDCARD) && !defined(USE_FLASHFS)) || !defined(USE_BLACKBOX)
 #undef USE_USB_MSC
 #endif
 
 #if !defined(USE_VCP)
 #undef USE_USB_CDC_HID
+#undef USE_USB_MSC
 #endif
 
 #if defined(USE_USB_CDC_HID) || defined(USE_USB_MSC)
 #define USE_USB_ADVANCED_PROFILES
 #endif
 
-// Determine if the target could have a 32KHz capable gyro
-#if defined(USE_GYRO_SPI_MPU6500) || defined(USE_GYRO_SPI_MPU9250) || defined(USE_GYRO_SPI_ICM20689)
-#define USE_32K_CAPABLE_GYRO
-#endif
 
 #if defined(USE_FLASH_W25M512)
 #define USE_FLASH_W25M
@@ -226,10 +223,6 @@
 #endif
 #endif
 
-#ifndef USE_BLACKBOX
-#undef USE_USB_MSC
-#endif
-
 #if (!defined(USE_FLASHFS) || !defined(USE_RTC_TIME) || !defined(USE_USB_MSC))
 #undef USE_PERSISTENT_MSC_RTC
 #endif
@@ -242,6 +235,10 @@
 
 #if !defined(USE_LED_STRIP)
 #undef USE_LED_STRIP_STATUS_MODE
+#endif
+
+#if defined(USE_LED_STRIP) && !defined(USE_LED_STRIP_STATUS_MODE)
+#define USE_WS2811_SINGLE_COLOUR
 #endif
 
 #if defined(SIMULATOR_BUILD) || defined(UNIT_TEST)
@@ -260,4 +257,13 @@
 
 #ifndef USE_DSHOT_TELEMETRY
 #undef USE_RPM_FILTER
+#endif
+
+#if !defined(USE_BOARD_INFO)
+#undef USE_SIGNATURE
+#endif
+
+#if !defined(USE_ACC)
+#undef USE_GPS_RESCUE
+#undef USE_ACRO_TRAINER
 #endif
