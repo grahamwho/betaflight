@@ -40,7 +40,9 @@
 #include "pg/pg_ids.h"
 
 #include "io/displayport_max7456.h"
-#include "io/osd.h"
+
+#include "osd/osd.h"
+#include "osd/osd_elements.h"
 
 #ifdef USE_EXTENDED_CMS_MENUS
 static uint16_t osdConfig_item_pos[OSD_ITEM_COUNT];
@@ -56,10 +58,11 @@ static long menuOsdActiveElemsOnExit(const OSD_Entry *self)
     UNUSED(self);
 
     memcpy(&osdConfigMutable()->item_pos[0], &osdConfig_item_pos[0], sizeof(uint16_t) * OSD_ITEM_COUNT);
+    osdAnalyzeActiveElements();
     return 0;
 }
 
-OSD_Entry menuOsdActiveElemsEntries[] =
+const OSD_Entry menuOsdActiveElemsEntries[] =
 {
     {"--- ACTIV ELEM ---", OME_Label,   NULL, NULL, 0},
     {"RSSI",               OME_VISIBLE, NULL, &osdConfig_item_pos[OSD_RSSI_VALUE], DYNAMIC},
@@ -171,7 +174,7 @@ static long menuAlarmsOnExit(const OSD_Entry *self)
     return 0;
 }
 
-OSD_Entry menuAlarmsEntries[] =
+const OSD_Entry menuAlarmsEntries[] =
 {
     {"--- ALARMS ---", OME_Label, NULL, NULL, 0},
     {"RSSI",     OME_UINT8,  NULL, &(OSD_UINT8_t){&osdConfig_rssi_alarm, 5, 90, 5}, 0},
@@ -220,7 +223,7 @@ static long menuTimersOnExit(const OSD_Entry *self)
 
 static const char * osdTimerPrecisionNames[] = {"SCND", "HDTH"};
 
-OSD_Entry menuTimersEntries[] =
+const OSD_Entry menuTimersEntries[] =
 {
     {"--- TIMERS ---", OME_Label, NULL, NULL, 0},
     {"1 SRC",          OME_TAB,   NULL, &(OSD_TAB_t){&timerSource[OSD_TIMER_1], OSD_TIMER_SRC_COUNT - 1, osdTimerSourceNames}, 0 },
@@ -274,8 +277,7 @@ static long cmsx_menuOsdOnExit(const OSD_Entry *self)
     UNUSED(self);
 
 #ifdef USE_OSD_PROFILES
-    osdConfigMutable()->osdProfileIndex = osdConfig_osdProfileIndex;
-    setOsdProfile(osdConfig()->osdProfileIndex);
+    changeOsdProfileIndex(osdConfig_osdProfileIndex);
 #endif
 
 #ifdef USE_MAX7456
@@ -284,10 +286,10 @@ static long cmsx_menuOsdOnExit(const OSD_Entry *self)
     displayPortProfileMax7456Mutable()->whiteBrightness = displayPortProfileMax7456_whiteBrightness;
 #endif
 
-  return 0;
+    return 0;
 }
 
-OSD_Entry cmsx_menuOsdEntries[] =
+const OSD_Entry cmsx_menuOsdEntries[] =
 {
     {"---OSD---",   OME_Label,   NULL,          NULL,                0},
 #ifdef USE_OSD_PROFILES

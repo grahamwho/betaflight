@@ -31,6 +31,7 @@
 #include "common/color.h"
 
 #include "drivers/dma.h"
+#include "drivers/dma_reqmap.h"
 #include "drivers/io.h"
 #include "drivers/nvic.h"
 #include "drivers/rcc.h"
@@ -87,7 +88,25 @@ bool ws2811LedStripHardwareInit(ioTag_t ioTag)
     const timerHardware_t *timerHardware = timerGetByTag(ioTag);
     timer = timerHardware->tim;
 
-    if (timerHardware->dmaRef == NULL) {
+#if defined(USE_DMA_SPEC)
+    const dmaChannelSpec_t *dmaSpec = dmaGetChannelSpecByTimer(timerHardware);
+
+    if (dmaSpec == NULL) {
+        return false;
+    }
+
+    dmaRef = dmaSpec->ref;
+#if defined(STM32F4)
+    uint32_t dmaChannel = dmaSpec->channel;
+#endif
+#else
+    dmaRef = timerHardware->dmaRef;
+#if defined(STM32F4)
+    uint32_t dmaChannel = timerHardware->dmaChannel;
+#endif
+#endif
+
+    if (dmaRef == NULL) {
         return false;
     }
 
@@ -149,10 +168,9 @@ bool ws2811LedStripHardwareInit(ioTag_t ioTag)
 
     TIM_Cmd(timer, ENABLE);
 
-    dmaInit(timerHardware->dmaIrqHandler, OWNER_LED_STRIP, 0);
-    dmaSetHandler(timerHardware->dmaIrqHandler, WS2811_DMA_IRQHandler, NVIC_PRIO_WS2811_DMA, 0);
+    dmaInit(dmaGetIdentifier(dmaRef), OWNER_LED_STRIP, 0);
+    dmaSetHandler(dmaGetIdentifier(dmaRef), WS2811_DMA_IRQHandler, NVIC_PRIO_WS2811_DMA, 0);
 
-    dmaRef = timerHardware->dmaRef;
     DMA_DeInit(dmaRef);
 
     /* configure DMA */
@@ -165,7 +183,7 @@ bool ws2811LedStripHardwareInit(ioTag_t ioTag)
     DMA_InitStructure.DMA_MemoryInc = DMA_MemoryInc_Enable;
 
 #if defined(STM32F4)
-    DMA_InitStructure.DMA_Channel = timerHardware->dmaChannel;
+    DMA_InitStructure.DMA_Channel = dmaChannel;
     DMA_InitStructure.DMA_Memory0BaseAddr = (uint32_t)ledStripDMABuffer;
     DMA_InitStructure.DMA_DIR = DMA_DIR_MemoryToPeripheral;
     DMA_InitStructure.DMA_PeripheralDataSize = DMA_PeripheralDataSize_Word;
@@ -179,7 +197,12 @@ bool ws2811LedStripHardwareInit(ioTag_t ioTag)
     DMA_InitStructure.DMA_Priority = DMA_Priority_High;
     DMA_InitStructure.DMA_M2M = DMA_M2M_Disable;
 #endif
+
+#if defined(USE_WS2811_SINGLE_COLOUR)
     DMA_InitStructure.DMA_Mode = DMA_Mode_Circular;
+#else
+    DMA_InitStructure.DMA_Mode = DMA_Mode_Normal;
+#endif
 
     DMA_Init(dmaRef, &DMA_InitStructure);
     TIM_DMACmd(timer, timerDmaSource(timerHardware->channel), ENABLE);

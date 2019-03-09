@@ -1,3 +1,14 @@
+## Important: Feature freeze / release candidate phase for Betaflight 4.0
+
+From 01 Mar 2019 until the release of Betaflight 4.0.0 (scheduled for 01 Apr 2019), the project is in a 'feature freeze / release candidate' phase. This means:
+
+1. Pull requests can still be submitted as normal. Comments / discussions will probably be slower than normal due to shifted priorities;
+
+2. If your pull request is a fix for an existing bug, or an update for a single target that has a low risk of side effect for other targets, it will be reviewed, and if accepted merged into `master` for the 4.0 release;
+
+3. All other pull requests will be scheduled for 4.1, and discussed / reviewed / merged into `master` after 4.0.0 has been released. Please keep in mind that this potentially means that you will have to rebase your changes if they are broken by bugfixes made for 4.0.
+
+
 ## Important: Embargo on new targets for Betaflight 4.0
 
 As announced earlier in https://github.com/betaflight/betaflight#betaflight-40, Betaflight 4.0 will introduce a radically new way to define targets. At the moment, we are making the changes necessary for this, and this requires some changes to how targets are defined in the 'legacy' way. Because of this, any pull request opened against `master` that introduces a new target is likely to be outdated by the time it has been reviewed. This means extra work for the target maintainer and the reviewers, for little or no benefit.
@@ -23,6 +34,8 @@ Because of this, the following embargo is put in place:
 
 5. All pull requests are reviewed. Be ready to receive constructive criticism, and to learn and improve your coding style. Also, be ready to clarify anything that isn't already sufficiently explained in the code and text of the pull request, and to defend your ideas.
 
-6. If your pull request is a fix for one or more issues that are open in GitHub, add a comment to your pull request, and add the issue numbers of the issues that are fixed in the form `Fixes #<issue number>`. This will cause the issues to be closed when the pull request is merged;
+6. We use continuos integration (CI) with [Travis](https://travis-ci.com/betaflight) to build build all targets and run the test suite for every pull request. Pull requests that fail any of the builds or fail tests will most likely not be reviewed before they are fixed to build successfully and pass the tests. In order to get a quick idea if there are things that need fixing **before** opening a pull request or pushing an update into an existing pull request, run `make pre-push` to run a representative subset of the CI build. _Note: This is not an exhaustive test(which will take hours to run on any desktop type system), so even if this passes the CI build might still fail._
 
-7. Remove this Text :).
+7. If your pull request is a fix for one or more issues that are open in GitHub, add a comment to your pull request, and add the issue numbers of the issues that are fixed in the form `Fixes #<issue number>`. This will cause the issues to be closed when the pull request is merged;
+
+8. Remove this Text :).

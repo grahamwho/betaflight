@@ -133,9 +133,9 @@ void resetPidProfile(pidProfile_t *pidProfile)
 {
     RESET_CONFIG(pidProfile_t, pidProfile,
         .pid = {
-            [PID_ROLL] =  { 46, 65, 35, 60 },
-            [PID_PITCH] = { 50, 75, 38, 60 },
-            [PID_YAW] =   { 45, 100, 0, 100 },
+            [PID_ROLL] =  { 42, 60, 35, 70 },
+            [PID_PITCH] = { 46, 70, 38, 75 },
+            [PID_YAW] =   { 35, 100, 0, 0 },
             [PID_LEVEL] = { 50, 50, 75, 0 },
             [PID_MAG] =   { 40, 0, 0, 0 },
         },
@@ -167,16 +167,16 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .itermLimit = 400,
         .throttle_boost = 5,
         .throttle_boost_cutoff = 15,
-        .iterm_rotation = true,
+        .iterm_rotation = false,
         .smart_feedforward = false,
         .iterm_relax = ITERM_RELAX_RP,
-        .iterm_relax_cutoff = 20,
+        .iterm_relax_cutoff = ITERM_RELAX_CUTOFF_DEFAULT,
         .iterm_relax_type = ITERM_RELAX_SETPOINT,
         .acro_trainer_angle_limit = 20,
         .acro_trainer_lookahead_ms = 50,
         .acro_trainer_debug_axis = FD_ROLL,
         .acro_trainer_gain = 75,
-        .abs_control_gain = 0,
+        .abs_control_gain = 10,
         .abs_control_limit = 90,
         .abs_control_error_limit = 20,
         .abs_control_cutoff = 11,
@@ -196,11 +196,11 @@ void resetPidProfile(pidProfile_t *pidProfile)
         .integrated_yaw_relax = 200,
         .thrustLinearization = 0,
         .d_min = { 20, 22, 0 },      // roll, pitch, yaw
-        .d_min_gain = 20,
+        .d_min_gain = 27,
         .d_min_advance = 20,
         .motor_output_limit = 100,
         .auto_profile_cell_count = AUTO_PROFILE_CELL_COUNT_STAY,
-        .transient_throttle_limit = 0,
+        .transient_throttle_limit = 15,
     );
 #ifdef USE_DYN_LPF
     pidProfile->dterm_lowpass_hz = 150;
@@ -267,7 +267,8 @@ static FAST_RAM_ZERO_INIT pt1Filter_t ptermYawLowpass;
 static FAST_RAM_ZERO_INIT pt1Filter_t windupLpf[XYZ_AXIS_COUNT];
 static FAST_RAM_ZERO_INIT uint8_t itermRelax;
 static FAST_RAM_ZERO_INIT uint8_t itermRelaxType;
-static FAST_RAM_ZERO_INIT uint8_t itermRelaxCutoff;
+static uint8_t itermRelaxCutoff;
+static FAST_RAM_ZERO_INIT float itermRelaxSetpointThreshold;
 #endif
 
 #if defined(USE_ABSOLUTE_CONTROL)
@@ -572,6 +573,12 @@ void pidInitConfig(const pidProfile_t *pidProfile)
         pidCoefficient[axis].Kd = DTERM_SCALE * pidProfile->pid[axis].D;
         pidCoefficient[axis].Kf = FEEDFORWARD_SCALE * (pidProfile->pid[axis].F / 100.0f);
     }
+#ifdef USE_INTEGRATED_YAW_CONTROL
+    if (!pidProfile->use_integrated_yaw)
+#endif
+    {
+        pidCoefficient[FD_YAW].Ki *= 2.5f;
+    }
 
     levelGain = pidProfile->pid[PID_LEVEL].P / 10.0f;
     horizonGain = pidProfile->pid[PID_LEVEL].I / 10.0f;
@@ -615,10 +622,13 @@ void pidInitConfig(const pidProfile_t *pidProfile)
 #if defined(USE_SMART_FEEDFORWARD)
     smartFeedforward = pidProfile->smart_feedforward;
 #endif
+
 #if defined(USE_ITERM_RELAX)
     itermRelax = pidProfile->iterm_relax;
     itermRelaxType = pidProfile->iterm_relax_type;
     itermRelaxCutoff = pidProfile->iterm_relax_cutoff;
+    // adapt setpoint threshold to user changes from default cutoff value
+    itermRelaxSetpointThreshold = ITERM_RELAX_SETPOINT_THRESHOLD * ITERM_RELAX_CUTOFF_DEFAULT / itermRelaxCutoff;
 #endif
 
 #ifdef USE_ACRO_TRAINER
@@ -1107,16 +1117,13 @@ STATIC_UNIT_TESTED void applyItermRelax(const int axis, const float iterm,
     const float setpointLpf = pt1FilterApply(&windupLpf[axis], *currentPidSetpoint);
     const float setpointHpf = fabsf(*currentPidSetpoint - setpointLpf);
 
-    if (itermRelax &&
-       (axis < FD_YAW || itermRelax == ITERM_RELAX_RPY ||
-       itermRelax == ITERM_RELAX_RPY_INC)) {
-        const float itermRelaxFactor = 1 - setpointHpf / ITERM_RELAX_SETPOINT_THRESHOLD;
-
+    if (itermRelax && (axis < FD_YAW || itermRelax == ITERM_RELAX_RPY || itermRelax == ITERM_RELAX_RPY_INC)) {
+        const float itermRelaxFactor = MAX(0, 1 - setpointHpf / itermRelaxSetpointThreshold);
         const bool isDecreasingI =
             ((iterm > 0) && (*itermErrorRate < 0)) || ((iterm < 0) && (*itermErrorRate > 0));
         if ((itermRelax >= ITERM_RELAX_RP_INC) && isDecreasingI) {
             // Do Nothing, use the precalculed itermErrorRate
-        } else if (itermRelaxType == ITERM_RELAX_SETPOINT && setpointHpf < ITERM_RELAX_SETPOINT_THRESHOLD) {
+        } else if (itermRelaxType == ITERM_RELAX_SETPOINT) {
             *itermErrorRate *= itermRelaxFactor;
         } else if (itermRelaxType == ITERM_RELAX_GYRO ) {
             *itermErrorRate = fapplyDeadband(setpointLpf - gyroRate, setpointHpf);

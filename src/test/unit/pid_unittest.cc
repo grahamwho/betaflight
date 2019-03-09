@@ -94,6 +94,9 @@ void setDefaultTestSettings(void) {
     pidProfile->pid[PID_YAW]   =  { 70, 45, 20, 60 };
     pidProfile->pid[PID_LEVEL] =  { 50, 50, 75, 0 };
 
+    // Compensate for the upscaling done without 'use_integrated_yaw'
+    pidProfile->pid[PID_YAW].I = pidProfile->pid[PID_YAW].I / 2.5f;
+
     pidProfile->pidSumLimit = PIDSUM_LIMIT;
     pidProfile->pidSumLimitYaw = PIDSUM_LIMIT_YAW;
     pidProfile->yaw_lowpass_hz = 0;
@@ -529,12 +532,12 @@ TEST(pidControllerTest, testItermRelax) {
 
     applyItermRelax(FD_PITCH, pidData[FD_PITCH].I, gyroRate, &itermErrorRate, &currentPidSetpoint);
 
-    ASSERT_NEAR(-6.66, itermErrorRate, calculateTolerance(-6.66));
+    ASSERT_NEAR(-8.16, itermErrorRate, calculateTolerance(-8.16));
     currentPidSetpoint += ITERM_RELAX_SETPOINT_THRESHOLD;
     applyItermRelax(FD_PITCH, pidData[FD_PITCH].I, gyroRate, &itermErrorRate, &currentPidSetpoint);
-    EXPECT_FLOAT_EQ(itermErrorRate, 0);
+    ASSERT_NEAR(-2.69, itermErrorRate, calculateTolerance(-2.69));
     applyItermRelax(FD_PITCH, pidData[FD_PITCH].I, gyroRate, &itermErrorRate, &currentPidSetpoint);
-    EXPECT_FLOAT_EQ(itermErrorRate, 0);
+    ASSERT_NEAR(-0.84, itermErrorRate, calculateTolerance(-0.84));
 
     pidProfile->iterm_relax_type = ITERM_RELAX_GYRO;
     pidInit(pidProfile);
@@ -578,7 +581,7 @@ TEST(pidControllerTest, testItermRelax) {
     pidProfile->iterm_relax = ITERM_RELAX_RPY;
     pidInit(pidProfile);
     applyItermRelax(FD_YAW, pidData[FD_YAW].I, gyroRate, &itermErrorRate, &currentPidSetpoint);
-    ASSERT_NEAR(-3.6, itermErrorRate, calculateTolerance(-3.6));
+    ASSERT_NEAR(-6.46, itermErrorRate, calculateTolerance(-3.6));
 }
 
 // TODO - Add more tests

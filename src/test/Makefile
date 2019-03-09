@@ -166,7 +166,8 @@ maths_unittest_SRC := \
 
 
 osd_unittest_SRC := \
-		$(USER_DIR)/io/osd.c \
+		$(USER_DIR)/osd/osd.c \
+		$(USER_DIR)/osd/osd_elements.c \
 		$(USER_DIR)/common/typeconversion.c \
 		$(USER_DIR)/drivers/display.c \
 		$(USER_DIR)/common/maths.c \
@@ -322,6 +323,7 @@ rcdevice_unittest_SRC := \
 		$(USER_DIR)/fc/rc_modes.c \
 		$(USER_DIR)/io/rcdevice.c \
 		$(USER_DIR)/io/rcdevice_cam.c \
+		$(USER_DIR)/pg/pg.c \
 
 pid_unittest_SRC :=  \
 		$(USER_DIR)/common/filter.c \
@@ -383,6 +385,7 @@ COMMON_FLAGS = \
 	-Wall \
 	-Wextra \
 	-Werror \
+	-Wno-error=unused-command-line-argument \
 	-ggdb3 \
 	-O0 \
 	-DUNIT_TEST \

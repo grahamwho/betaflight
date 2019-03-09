@@ -85,7 +85,6 @@
 #include "io/gps.h"
 #include "io/ledstrip.h"
 #include "io/motors.h"
-#include "io/osd.h"
 #include "io/serial.h"
 #include "io/serial_4way.h"
 #include "io/servos.h"
@@ -98,6 +97,9 @@
 #include "msp/msp_box.h"
 #include "msp/msp_protocol.h"
 #include "msp/msp_serial.h"
+
+#include "osd/osd.h"
+#include "osd/osd_elements.h"
 
 #include "pg/beeper.h"
 #include "pg/board.h"
@@ -489,17 +491,23 @@ static bool mspCommonProcessOutCommand(uint8_t cmdMSP, sbuf_t *dst, mspPostProce
 #else
         sbufWriteU8(dst, 0);  // 0 == FC
 #endif
-        // Board communication capabilities (uint8)
-        // Bit 0: 1 iff the board has VCP
-        // Bit 1: 1 iff the board supports software serial
-        uint8_t commCapabilities = 0;
+        // Target capabilities (uint8)
+#define TARGET_HAS_VCP_BIT 0
+#define TARGET_HAS_SOFTSERIAL_BIT 1
+#define TARGET_IS_UNIFIED_BIT 2
+
+        uint8_t targetCapabilities = 0;
 #ifdef USE_VCP
-        commCapabilities |= 1 << 0;
+        targetCapabilities |= 1 << TARGET_HAS_VCP_BIT;
 #endif
 #if defined(USE_SOFTSERIAL1) || defined(USE_SOFTSERIAL2)
-        commCapabilities |= 1 << 1;
+        targetCapabilities |= 1 << TARGET_HAS_SOFTSERIAL_BIT;
 #endif
-        sbufWriteU8(dst, commCapabilities);
+#if defined(USE_UNIFIED_TARGET)
+        targetCapabilities |= 1 << TARGET_IS_UNIFIED_BIT;
+#endif
+
+        sbufWriteU8(dst, targetCapabilities);
 
         // Target name with explicit length
         sbufWriteU8(dst, strlen(targetName));
@@ -1399,6 +1407,19 @@ static bool mspProcessOutCommand(uint8_t cmdMSP, sbuf_t *dst)
         sbufWriteU8(dst, gyroConfig()->gyro_lowpass_type);
         sbufWriteU8(dst, gyroConfig()->gyro_lowpass2_type);
         sbufWriteU16(dst, currentPidProfile->dterm_lowpass2_hz);
+        // Added in MSP API 1.41
+        sbufWriteU8(dst, currentPidProfile->dterm_filter2_type);
+#if defined(USE_DYN_LPF)
+        sbufWriteU16(dst, gyroConfig()->dyn_lpf_gyro_min_hz);
+        sbufWriteU16(dst, gyroConfig()->dyn_lpf_gyro_max_hz);
+        sbufWriteU16(dst, currentPidProfile->dyn_lpf_dterm_min_hz);
+        sbufWriteU16(dst, currentPidProfile->dyn_lpf_dterm_max_hz);
+#else
+        sbufWriteU16(dst, 0);
+        sbufWriteU16(dst, 0);
+        sbufWriteU16(dst, 0);
+        sbufWriteU16(dst, 0);
+#endif
 
         break;
     case MSP_PID_ADVANCED:
@@ -1452,6 +1473,26 @@ static bool mspProcessOutCommand(uint8_t cmdMSP, sbuf_t *dst)
         sbufWriteU16(dst, currentPidProfile->pid[PID_YAW].F);
 
         sbufWriteU8(dst, currentPidProfile->antiGravityMode);
+#if defined(USE_D_MIN)
+        sbufWriteU8(dst, currentPidProfile->d_min[PID_ROLL]);
+        sbufWriteU8(dst, currentPidProfile->d_min[PID_PITCH]);
+        sbufWriteU8(dst, currentPidProfile->d_min[PID_YAW]);
+        sbufWriteU8(dst, currentPidProfile->d_min_gain);
+        sbufWriteU8(dst, currentPidProfile->d_min_advance);
+#else
+        sbufWriteU8(dst, 0);
+        sbufWriteU8(dst, 0);
+        sbufWriteU8(dst, 0);
+        sbufWriteU8(dst, 0);
+        sbufWriteU8(dst, 0);
+#endif
+#if defined(USE_INTEGRATED_YAW_CONTROL)
+        sbufWriteU8(dst, currentPidProfile->use_integrated_yaw);
+        sbufWriteU8(dst, currentPidProfile->integrated_yaw_relax);
+#else
+        sbufWriteU8(dst, 0);
+        sbufWriteU8(dst, 0);
+#endif
 
         break;
     case MSP_SENSOR_CONFIG:
@@ -2023,6 +2064,22 @@ static mspResult_e mspProcessInCommand(uint8_t cmdMSP, sbuf_t *src)
             gyroConfigMutable()->gyro_lowpass2_type = sbufReadU8(src);
             currentPidProfile->dterm_lowpass2_hz = sbufReadU16(src);
         }
+        if (sbufBytesRemaining(src) >= 9) {
+            // Added in MSP API 1.41
+            currentPidProfile->dterm_filter2_type = sbufReadU8(src);
+#if defined(USE_DYN_LPF)
+            gyroConfigMutable()->dyn_lpf_gyro_min_hz = sbufReadU16(src);
+            gyroConfigMutable()->dyn_lpf_gyro_max_hz = sbufReadU16(src);
+            currentPidProfile->dyn_lpf_dterm_min_hz = sbufReadU16(src);
+            currentPidProfile->dyn_lpf_dterm_max_hz = sbufReadU16(src);
+#else
+            sbufReadU16(src);
+            sbufReadU16(src);
+            sbufReadU16(src);
+            sbufReadU16(src);
+#endif
+        }
+
         // reinitialize the gyro filters with the new values
         validateAndFixGyroConfig();
         gyroInitFilters();
@@ -2090,6 +2147,29 @@ static mspResult_e mspProcessInCommand(uint8_t cmdMSP, sbuf_t *src)
             currentPidProfile->pid[PID_YAW].F = sbufReadU16(src);
 
             currentPidProfile->antiGravityMode = sbufReadU8(src);
+        }
+        if (sbufBytesRemaining(src) >= 7) {
+            // Added in MSP API 1.41
+#if defined(USE_D_MIN)
+            currentPidProfile->d_min[PID_ROLL] = sbufReadU8(src);
+            currentPidProfile->d_min[PID_PITCH] = sbufReadU8(src);
+            currentPidProfile->d_min[PID_YAW] = sbufReadU8(src);
+            currentPidProfile->d_min_gain = sbufReadU8(src);
+            currentPidProfile->d_min_advance = sbufReadU8(src);
+#else
+            sbufReadU8(src);
+            sbufReadU8(src);
+            sbufReadU8(src);
+            sbufReadU8(src);
+            sbufReadU8(src);
+#endif
+#if defined(USE_INTEGRATED_YAW_CONTROL)
+            currentPidProfile->use_integrated_yaw = sbufReadU8(src);
+            currentPidProfile->integrated_yaw_relax = sbufReadU8(src);
+#else
+            sbufReadU8(src);
+            sbufReadU8(src);
+#endif
         }
         pidInitConfig(currentPidProfile);
 
@@ -2672,8 +2752,7 @@ static mspResult_e mspCommonProcessInCommand(uint8_t cmdMSP, sbuf_t *src, mspPos
                     // API >= 1.41
                     // selected OSD profile
 #ifdef USE_OSD_PROFILES
-                    osdConfigMutable()->osdProfileIndex = sbufReadU8(src);
-                    setOsdProfile(osdConfig()->osdProfileIndex);
+                    changeOsdProfileIndex(sbufReadU8(src));
 #else
                     sbufReadU8(src);
 #endif // USE_OSD_PROFILES
@@ -2714,6 +2793,7 @@ static mspResult_e mspCommonProcessInCommand(uint8_t cmdMSP, sbuf_t *src, mspPos
                 } else if (addr < OSD_ITEM_COUNT) {
                     /* Set element positions */
                     osdConfigMutable()->item_pos[addr] = value;
+                    osdAnalyzeActiveElements();
                 } else {
                   return MSP_RESULT_ERROR;
                 }

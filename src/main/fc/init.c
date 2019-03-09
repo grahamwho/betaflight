@@ -131,7 +131,6 @@
 #include "io/dashboard.h"
 #include "io/asyncfatfs/asyncfatfs.h"
 #include "io/transponder_ir.h"
-#include "io/osd.h"
 #include "io/pidaudio.h"
 #include "io/piniobox.h"
 #include "io/displayport_msp.h"
@@ -140,6 +139,8 @@
 #include "io/vtx_control.h"
 #include "io/vtx_smartaudio.h"
 #include "io/vtx_tramp.h"
+
+#include "osd/osd.h"
 
 #include "scheduler/scheduler.h"
 
@@ -260,7 +261,13 @@ void init(void)
 #endif
 
 #ifdef USE_BRUSHED_ESC_AUTODETECT
-    detectBrushedESC();
+    // Opportunistically use the first motor pin of the default configuration for detection.
+    // We are doing this as with some boards, timing seems to be important, and the later detection will fail.
+    ioTag_t motorIoTag = timerioTagGetByUsage(TIM_USE_MOTOR, 0);
+
+    if (motorIoTag) {
+        detectBrushedESC(motorIoTag);
+    }
 #endif
 
     initEEPROM();
@@ -278,6 +285,15 @@ void init(void)
     }
 
     systemState |= SYSTEM_STATE_CONFIG_LOADED;
+
+#ifdef USE_BRUSHED_ESC_AUTODETECT
+    // Now detect again with the actually configured pin for motor 1, if it is not the default pin.
+    ioTag_t configuredMotorIoTag = motorConfig()->dev.ioTags[0];
+
+    if (configuredMotorIoTag && configuredMotorIoTag != motorIoTag) {
+        detectBrushedESC(configuredMotorIoTag);
+    }
+#endif
 
     //i2cSetOverclock(masterConfig.i2c_overclock);
 

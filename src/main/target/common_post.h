@@ -34,6 +34,10 @@
 #undef USE_ESC_SENSOR
 #endif
 
+#ifndef USE_ESC_SENSOR
+#undef USE_ESC_SENSOR_TELEMETRY
+#endif
+
 // XXX Followup implicit dependencies among DASHBOARD, display_xxx and USE_I2C.
 // XXX This should eventually be cleaned up.
 #ifndef USE_I2C
@@ -141,6 +145,14 @@
 #define USE_RX_CC2500
 #endif
 
+#if !defined(USE_RX_CC2500)
+#undef USE_RX_CC2500_SPI_PA_LNA
+#endif
+
+#if !defined(USE_RX_CC2500_SPI_PA_LNA)
+#undef USE_RX_CC2500_SPI_DIVERSITY
+#endif
+
 // Burst dshot to default off if not configured explicitly by target
 #ifndef ENABLE_DSHOT_DMAR
 #define ENABLE_DSHOT_DMAR false
@@ -202,7 +214,7 @@
 #define USE_RX_XN297
 #endif
 
-#ifdef GENERIC_TARGET
+#ifdef USE_UNIFIED_TARGET
 #define USE_CONFIGURATION_STATE
 
 // Setup crystal frequency for backward compatibility
@@ -214,7 +226,7 @@
 #else
 #define SYSTEM_HSE_VALUE (HSE_VALUE/1000000U)
 #endif
-#endif // GENERIC_TARGET
+#endif // USE_UNIFIED_TARGET
 
 // Number of pins that needs pre-init
 #ifdef USE_SPI
@@ -266,4 +278,28 @@
 #if !defined(USE_ACC)
 #undef USE_GPS_RESCUE
 #undef USE_ACRO_TRAINER
+#endif
+
+#ifndef USE_BEEPER
+#undef BEEPER_PIN
+#undef BEEPER_PWM_HZ
+#endif
+
+#if !defined(USE_DMA_SPEC)
+#undef USE_TIMER_MGMT
+#endif
+
+#if defined(USE_TIMER_MGMT)
+#undef USED_TIMERS
+#else
+#undef USE_UNIFIED_TARGET
+#endif
+
+#if !defined(USE_RANGEFINDER)
+#undef USE_RANGEFINDER_HCSR04
+#undef USE_RANGEFINDER_SRF10
+#undef USE_RANGEFINDER_HCSR04_I2C
+#undef USE_RANGEFINDER_VL53L0X
+#undef USE_RANGEFINDER_UIB
+#undef USE_RANGEFINDER_TF
 #endif
