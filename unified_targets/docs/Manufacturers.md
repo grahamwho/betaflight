@@ -1,4 +1,7 @@
-Last updated: 17/02/2019
+# Manufacturer Ids
+
+This is the official list of manufacturer ids (`manufacturer_id` in the target config) that will be supported for loading onto unified targets by Betaflight configurator.
+
 
 |Manufacturer Id|Name|Contact|
 |-|-|-|
@@ -9,10 +12,11 @@ Last updated: 17/02/2019
 |DRCL|dronercland|https://www.instagram.com/dronercland/|
 |DYST|DongYang Smart Technology Co.,Ltd (dys)|http://www.dys.hk/|
 |FFPV|Furious FPV|https://furiousfpv.com/|
+|FLWO|Flywoo|https://flywoo.net/|
 |HAMO|Happymodel|http://www.happymodel.cn/|
 |HBRO|Holybro|http://www.holybro.com/index.html|
+|IFRC|iFlight Innovation Technology Ltd.|https://www.iflight-rc.com/|
 |MTKS|Matek Systems|http://www.mateksys.com/|
 |RCTI|RCTimer|http://rctimer.com/|
-
-
-This is the official list of manufacturer ids (`manufacturer_id` in the target config) that will be supported for loading onto unified targets by Betaflight configurator.
+|SPRO|Seriously Pro Racing (SP Racing)|http://seriouslypro.com/|
+|TTRH|TransTEC|http://www.transtechobby.com/|
