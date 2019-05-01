@@ -83,4 +83,8 @@ const char * const debugModeNames[DEBUG_COUNT] = {
     "DSHOT_RPM_TELEMETRY",
     "RPM_FILTER",
     "D_MIN",
+    "AC_CORRECTION",
+    "AC_ERROR",
+    "DUAL_GYRO_SCALED",
+    "DSHOT_RPM_ERRORS",
 };

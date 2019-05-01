@@ -190,7 +190,7 @@ uint8_t escPortIndex;
 #ifdef USE_ESCSERIAL
 static void mspEscPassthroughFn(serialPort_t *serialPort)
 {
-    escEnablePassthrough(serialPort, escPortIndex, escMode);
+    escEnablePassthrough(serialPort, &motorConfig()->dev, escPortIndex, escMode);
 }
 #endif
 
@@ -1007,7 +1007,12 @@ static bool mspProcessOutCommand(uint8_t cmdMSP, sbuf_t *dst)
         // added in 1.41
         sbufWriteU8(dst, currentControlRateProfile->throttle_limit_type);
         sbufWriteU8(dst, currentControlRateProfile->throttle_limit_percent);
-        
+
+        // added in 1.42
+        sbufWriteU16(dst, currentControlRateProfile->rate_limit[FD_ROLL]);
+        sbufWriteU16(dst, currentControlRateProfile->rate_limit[FD_PITCH]);
+        sbufWriteU16(dst, currentControlRateProfile->rate_limit[FD_YAW]);
+
         break;
 
     case MSP_PID:
@@ -1357,13 +1362,12 @@ static bool mspProcessOutCommand(uint8_t cmdMSP, sbuf_t *dst)
         sbufWriteU8(dst, compassConfig()->mag_align);
 
         // API 1.41 - Add multi-gyro indicator, selected gyro, and support for separate gyro 1 & 2 alignment
+        sbufWriteU8(dst, getGyroDetectionFlags());
 #ifdef USE_MULTI_GYRO
-        sbufWriteU8(dst, 1);    // USE_MULTI_GYRO
         sbufWriteU8(dst, gyroConfig()->gyro_to_use);
         sbufWriteU8(dst, gyroDeviceConfig(0)->align);
         sbufWriteU8(dst, gyroDeviceConfig(1)->align);
 #else
-        sbufWriteU8(dst, 0);
         sbufWriteU8(dst, GYRO_CONFIG_USE_GYRO_1);
         sbufWriteU8(dst, gyroDeviceConfig(0)->align);
         sbufWriteU8(dst, ALIGN_DEFAULT);
@@ -1441,11 +1445,7 @@ static bool mspProcessOutCommand(uint8_t cmdMSP, sbuf_t *dst)
         sbufWriteU16(dst, currentPidProfile->itermAcceleratorGain);
         sbufWriteU16(dst, 0); // was currentPidProfile->dtermSetpointWeight
         sbufWriteU8(dst, currentPidProfile->iterm_rotation);
-#if defined(USE_SMART_FEEDFORWARD)
-        sbufWriteU8(dst, currentPidProfile->smart_feedforward);
-#else
         sbufWriteU8(dst, 0);
-#endif
 #if defined(USE_ITERM_RELAX)
         sbufWriteU8(dst, currentPidProfile->iterm_relax);
         sbufWriteU8(dst, currentPidProfile->iterm_relax_type);
@@ -1501,8 +1501,16 @@ static bool mspProcessOutCommand(uint8_t cmdMSP, sbuf_t *dst)
 #else
         sbufWriteU8(dst, 0);
 #endif
+#ifdef USE_BARO
         sbufWriteU8(dst, barometerConfig()->baro_hardware);
+#else
+        sbufWriteU8(dst, 0);
+#endif
+#ifdef USE_MAG
         sbufWriteU8(dst, compassConfig()->mag_hardware);
+#else
+        sbufWriteU8(dst, 0);
+#endif
         break;
 
 #if defined(USE_VTX_COMMON)
@@ -1859,6 +1867,13 @@ static mspResult_e mspProcessInCommand(uint8_t cmdMSP, sbuf_t *src)
                 currentControlRateProfile->throttle_limit_percent = sbufReadU8(src);
             }
 
+            // version 1.42
+            if (sbufBytesRemaining(src) >= 6) {
+                currentControlRateProfile->rate_limit[FD_ROLL] = sbufReadU16(src);
+                currentControlRateProfile->rate_limit[FD_PITCH] = sbufReadU16(src);
+                currentControlRateProfile->rate_limit[FD_YAW] = sbufReadU16(src);
+            }
+
             initRcProcessing();
         } else {
             return MSP_RESULT_ERROR;
@@ -2114,11 +2129,7 @@ static mspResult_e mspProcessInCommand(uint8_t cmdMSP, sbuf_t *src)
         if (sbufBytesRemaining(src) >= 14) {
             // Added in MSP API 1.40
             currentPidProfile->iterm_rotation = sbufReadU8(src);
-#if defined(USE_SMART_FEEDFORWARD)
-            currentPidProfile->smart_feedforward = sbufReadU8(src);
-#else
             sbufReadU8(src);
-#endif
 #if defined(USE_ITERM_RELAX)
             currentPidProfile->iterm_relax = sbufReadU8(src);
             currentPidProfile->iterm_relax_type = sbufReadU8(src);
@@ -2180,9 +2191,16 @@ static mspResult_e mspProcessInCommand(uint8_t cmdMSP, sbuf_t *src)
 #else
         sbufReadU8(src);
 #endif
+#if defined(USE_BARO)
         barometerConfigMutable()->baro_hardware = sbufReadU8(src);
+#else
+        sbufReadU8(src);
+#endif
+#if defined(USE_MAG)
         compassConfigMutable()->mag_hardware = sbufReadU8(src);
-
+#else
+        sbufReadU8(src);
+#endif
         break;
 
     case MSP_RESET_CONF:

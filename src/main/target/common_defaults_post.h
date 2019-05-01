@@ -20,6 +20,10 @@
 
 // pg/max7456
 
+#ifndef DEBUG_MODE
+#define DEBUG_MODE DEBUG_NONE
+#endif
+
 #ifdef USE_MAX7456
 #ifndef MAX7456_CLOCK_CONFIG_DEFAULT
 #define MAX7456_CLOCK_CONFIG_DEFAULT    MAX7456_CLOCK_CONFIG_OC
@@ -293,14 +297,6 @@
 #endif
 #endif
 
-// F4 and F7 single gyro boards
-#if defined(USE_MULTI_GYRO) && !defined(GYRO_2_SPI_INSTANCE)
-#define GYRO_2_SPI_INSTANCE     GYRO_1_SPI_INSTANCE
-#define GYRO_2_CS_PIN           NONE
-#define GYRO_2_ALIGN            ALIGN_DEFAULT
-#define GYRO_2_EXTI_PIN         NONE
-#endif
-
 #if !defined(GYRO_1_SPI_INSTANCE)
 #define GYRO_1_SPI_INSTANCE     NULL
 #endif
@@ -315,6 +311,14 @@
 
 #if !defined(GYRO_1_ALIGN)
 #define GYRO_1_ALIGN            ALIGN_DEFAULT
+#endif
+
+// F4 and F7 single gyro boards
+#if defined(USE_MULTI_GYRO) && !defined(GYRO_2_SPI_INSTANCE)
+#define GYRO_2_SPI_INSTANCE     GYRO_1_SPI_INSTANCE
+#define GYRO_2_CS_PIN           NONE
+#define GYRO_2_ALIGN            ALIGN_DEFAULT
+#define GYRO_2_EXTI_PIN         NONE
 #endif
 
 #if defined(MPU_ADDRESS)

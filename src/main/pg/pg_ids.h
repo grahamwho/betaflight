@@ -79,6 +79,7 @@
 #define PG_IBUS_TELEMETRY_CONFIG 53 // CF 1.x
 //#define PG_VTX_CONFIG 54 // CF 1.x
 #define PG_GPS_RESCUE 55 // struct OK
+#define PG_POSITION 56
 
 // Driver configuration
 #define PG_DRIVER_PWM_RX_CONFIG 100 // does not exist in betaflight
@@ -141,7 +142,8 @@
 #define PG_RPM_FILTER_CONFIG 544
 #define PG_LED_STRIP_STATUS_MODE_CONFIG 545 // Used to hold the configuration for the LED_STRIP status mode (not built on targets with limited flash)
 #define PG_VTX_TABLE_CONFIG 546
-#define PG_BETAFLIGHT_END 546
+#define PG_STATS_CONFIG 547
+#define PG_BETAFLIGHT_END 547
 
 
 // OSD configuration (subject to change)

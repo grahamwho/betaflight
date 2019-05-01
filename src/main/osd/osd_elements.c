@@ -206,6 +206,15 @@ int osdConvertTemperatureToSelectedUnit(int tempInDegreesCelcius)
 }
 #endif
 
+static void osdFormatAltitudeString(char * buff, int32_t altitudeCm)
+{
+    const int alt = osdGetMetersToSelectedUnit(altitudeCm) / 10;
+
+    tfp_sprintf(buff, "%5d %c", alt, osdGetMetersToSelectedUnitSymbol());
+    buff[5] = buff[4];
+    buff[4] = '.';
+}
+
 #ifdef USE_GPS
 static void osdFormatCoordinate(char *buff, char sym, int32_t val)
 {
@@ -287,6 +296,8 @@ static char osdGetTimerSymbol(osd_timer_source_e src)
     case OSD_TIMER_SRC_TOTAL_ARMED:
     case OSD_TIMER_SRC_LAST_ARMED:
         return SYM_FLY_M;
+    case OSD_TIMER_SRC_ON_OR_ARMED:
+        return ARMING_FLAG(ARMED) ? SYM_FLY_M : SYM_ON_M;
     default:
         return ' ';
     }
@@ -303,6 +314,8 @@ static timeUs_t osdGetTimerValue(osd_timer_source_e src)
         statistic_t *stats = osdGetStats();
         return stats->armed_time;
     }
+    case OSD_TIMER_SRC_ON_OR_ARMED:
+        return ARMING_FLAG(ARMED) ? osdFlyTime : micros();
     default:
         return 0;
     }
@@ -383,6 +396,33 @@ char osdGetMetersToSelectedUnitSymbol(void)
         return SYM_FT;
     default:
         return SYM_M;
+    }
+}
+
+/**
+ * Converts speed based on the current unit system.
+ * @param value in cm/s to convert
+ */
+int32_t osdGetSpeedToSelectedUnit(int32_t value)
+{
+    switch (osdConfig()->units) {
+    case OSD_UNIT_IMPERIAL:
+        return CM_S_TO_MPH(value);
+    default:
+        return CM_S_TO_KM_H(value);
+    }
+}
+
+/**
+ * Gets the correct speed symbol for the current unit system
+ */
+char osdGetSpeedToSelectedUnitSymbol(void)
+{
+    switch (osdConfig()->units) {
+    case OSD_UNIT_IMPERIAL:
+        return SYM_MPH;
+    default:
+        return SYM_KPH;
     }
 }
 
@@ -638,7 +678,7 @@ static void osdElementFlymode(osdElementParms_t *element)
     //  5. ACRO
 
     if (FLIGHT_MODE(FAILSAFE_MODE)) {
-        strcpy(element->buff, "!FS!");
+        strcpy(element->buff, "*FS*");
     } else if (FLIGHT_MODE(GPS_RESCUE_MODE)) {
         strcpy(element->buff, "RESC");
     } else if (FLIGHT_MODE(HEADFREE_MODE)) {
@@ -731,15 +771,7 @@ static void osdElementGpsSats(osdElementParms_t *element)
 
 static void osdElementGpsSpeed(osdElementParms_t *element)
 {
-    // FIXME ideally we want to use SYM_KMH symbol but it's not in the font any more, so we use K (M for MPH)
-    switch (osdConfig()->units) {
-    case OSD_UNIT_IMPERIAL:
-        tfp_sprintf(element->buff, "%3dM", CM_S_TO_MPH(gpsSol.groundSpeed));
-        break;
-    default:
-        tfp_sprintf(element->buff, "%3dK", CM_S_TO_KM_H(gpsSol.groundSpeed));
-        break;
-    }
+    tfp_sprintf(element->buff, "%3d%c", osdGetSpeedToSelectedUnit(gpsSol.groundSpeed), osdGetSpeedToSelectedUnitSymbol());
 }
 #endif // USE_GPS
 
@@ -818,8 +850,14 @@ static void osdElementMainBatteryUsage(osdElementParms_t *element)
 
 static void osdElementMainBatteryVoltage(osdElementParms_t *element)
 {
+    const int batteryVoltage = (getBatteryVoltage() + 5) / 10;
+
     element->buff[0] = osdGetBatterySymbol(getBatteryAverageCellVoltage());
-    tfp_sprintf(element->buff + 1, "%2d.%02d%c", getBatteryVoltage() / 100, getBatteryVoltage() % 100, SYM_VOLT);
+    if (batteryVoltage >= 100) {
+        tfp_sprintf(element->buff + 1, "%d.%d%c", batteryVoltage / 10, batteryVoltage % 10, SYM_VOLT);
+    } else {
+        tfp_sprintf(element->buff + 1, "%d.%d0%c", batteryVoltage / 10, batteryVoltage % 10, SYM_VOLT);
+    }
 }
 
 static void osdElementMotorDiagnostics(osdElementParms_t *element)
@@ -992,7 +1030,7 @@ static void osdElementVtxChannel(osdElementParms_t *element)
 
 static void osdElementWarnings(osdElementParms_t *element)
 {
-#define OSD_WARNINGS_MAX_SIZE 11
+#define OSD_WARNINGS_MAX_SIZE 12
 #define OSD_FORMAT_MESSAGE_BUFFER_SIZE (OSD_WARNINGS_MAX_SIZE + 1)
 
     STATIC_ASSERT(OSD_FORMAT_MESSAGE_BUFFER_SIZE <= OSD_ELEMENT_BUFFER_LENGTH, osd_warnings_size_exceeds_buffer_size);
@@ -1083,6 +1121,22 @@ static void osdElementWarnings(osdElementParms_t *element)
         return;
     }
 #endif // USE_LAUNCH_CONTROL
+
+    // RSSI
+    if (osdWarnGetState(OSD_WARNING_RSSI) && (getRssiPercent() < osdConfig()->rssi_alarm)) {
+        osdFormatMessage(element->buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, "RSSI LOW");
+        SET_BLINK(OSD_WARNINGS);
+        return;
+    }
+
+#ifdef USE_RX_LINK_QUALITY_INFO
+    // Link Quality
+    if (osdWarnGetState(OSD_WARNING_LINK_QUALITY) && (rxGetLinkQualityPercent() < osdConfig()->link_quality_alarm)) {
+        osdFormatMessage(element->buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, "LINK QUALITY");
+        SET_BLINK(OSD_WARNINGS);
+        return;
+    }
+#endif // USE_RX_LINK_QUALITY_INFO
 
     if (osdWarnGetState(OSD_WARNING_BATTERY_CRITICAL) && batteryState == BATTERY_CRITICAL) {
         osdFormatMessage(element->buff, OSD_FORMAT_MESSAGE_BUFFER_SIZE, " LAND NOW");
@@ -1252,7 +1306,9 @@ static const uint8_t osdElementDisplayOrder[] = {
     OSD_MAIN_BATT_USAGE,
     OSD_DISARMED,
     OSD_NUMERICAL_HEADING,
+#ifdef USE_VARIO
     OSD_NUMERICAL_VARIO,
+#endif
     OSD_COMPASS_BAR,
     OSD_ANTI_GRAVITY,
 #ifdef USE_BLACKBOX
@@ -1376,15 +1432,6 @@ const osdElementDrawFn osdElementDrawFunction[OSD_ITEM_COUNT] = {
 #endif
 };
 
-void osdFormatAltitudeString(char * buff, int32_t altitudeCm)
-{
-    const int alt = osdGetMetersToSelectedUnit(altitudeCm) / 10;
-
-    tfp_sprintf(buff, "%5d %c", alt, osdGetMetersToSelectedUnitSymbol());
-    buff[5] = buff[4];
-    buff[4] = '.';
-}
-
 static void osdAddActiveElement(osd_items_e element)
 {
     if (VISIBLE(osdConfig()->item_pos[element])) {
@@ -1421,7 +1468,7 @@ void osdAnalyzeActiveElements(void)
         osdAddActiveElement(OSD_FLIGHT_DIST);
     }
 #endif // GPS
-#ifdef USE_ESC_SENSOR  	
+#ifdef USE_ESC_SENSOR
     if (featureIsEnabled(FEATURE_ESC_SENSOR)) {
         osdAddActiveElement(OSD_ESC_TMP);
     }
@@ -1499,6 +1546,14 @@ void osdUpdateAlarms(void)
         CLR_BLINK(OSD_RSSI_VALUE);
     }
 
+#ifdef USE_RX_LINK_QUALITY_INFO
+    if (rxGetLinkQualityPercent() < osdConfig()->link_quality_alarm) {
+        SET_BLINK(OSD_LINK_QUALITY);
+    } else {
+        CLR_BLINK(OSD_LINK_QUALITY);
+    }
+#endif // USE_RX_LINK_QUALITY_INFO
+
     if (getBatteryState() == BATTERY_OK) {
         CLR_BLINK(OSD_MAIN_BATT_VOLTAGE);
         CLR_BLINK(OSD_AVG_CELL_VOLTAGE);
@@ -1540,7 +1595,7 @@ void osdUpdateAlarms(void)
         CLR_BLINK(OSD_REMAINING_TIME_ESTIMATE);
     }
 
-    if (alt >= osdConfig()->alt_alarm) {
+    if ((alt >= osdConfig()->alt_alarm) && ARMING_FLAG(ARMED)) {
         SET_BLINK(OSD_ALTITUDE);
     } else {
         CLR_BLINK(OSD_ALTITUDE);

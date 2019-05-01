@@ -20,6 +20,8 @@ TARGET_DIR = $(USER_DIR)/target
 include $(ROOT)/make/system-id.mk
 include $(ROOT)/make/targets_list.mk
 
+VPATH := $(VPATH):$(USER_DIR):$(TEST_DIR)
+
 # specify which files that are included in the test in addition to the unittest file.
 # variables available:
 #   <test_name>_SRC
@@ -126,6 +128,9 @@ flight_failsafe_unittest_SRC := \
 		$(USER_DIR)/fc/rc_modes.c \
 		$(USER_DIR)/fc/runtime_config.c \
 		$(USER_DIR)/flight/failsafe.c
+
+flight_failsafe_unittest_DEFINES := \
+		USE_GPS_RESCUE=
 
 
 flight_imu_unittest_SRC := \
@@ -658,4 +663,3 @@ target_list:
 	@echo $(foreach target,$(ALT_TARGETS),$(target)\>$(call get_base_target,$(target)))
 	@echo ========== ALT/BASE FULL MAPPING ==========
 	@echo $(foreach target,$(VALID_TARGETS),$(target)\>$(call get_base_target,$(target)))
-
