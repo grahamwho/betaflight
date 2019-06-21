@@ -29,6 +29,8 @@
 
 #include <stdint.h>
 
+#include "pg/vtx_io.h"
+
 #define VTX_RTC6705_BAND_COUNT      5
 #define VTX_RTC6705_CHANNEL_COUNT   8
 #define VTX_RTC6705_POWER_COUNT     3
@@ -45,8 +47,10 @@
 
 #define VTX_RTC6705_BOOT_DELAY  350 // milliseconds
 
-void rtc6705IOInit(void);
+bool rtc6705IOInit(const vtxIOConfig_t *vtxIOConfig);
 void rtc6705SetFrequency(uint16_t freq);
 void rtc6705SetRFPower(uint8_t rf_power);
 void rtc6705Disable(void);
 void rtc6705Enable(void);
+
+

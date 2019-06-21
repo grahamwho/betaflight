@@ -64,6 +64,11 @@
 #undef USE_VARIO
 #endif
 
+#if defined(USE_BARO) && !defined(BARO_EOC_PIN)
+#define BARO_EOC_PIN NONE
+#endif
+
+
 #if !defined(USE_SERIAL_RX)
 #undef USE_SERIALRX_CRSF
 #undef USE_SERIALRX_IBUS
@@ -93,6 +98,8 @@
 
 #if !defined(USE_SERIALRX_CRSF)
 #undef USE_TELEMETRY_CRSF
+#undef USE_CRSF_LINK_STATISTICS
+#undef USE_RX_RSSI_DBM
 #endif
 
 #if !defined(USE_TELEMETRY_CRSF) || !defined(USE_CMS)
@@ -180,9 +187,15 @@
 #if defined(USE_FLASH_W25M512)
 #define USE_FLASH_W25M
 #define USE_FLASH_M25P16
+#define USE_FLASH_W25M
 #endif
 
-#if defined(USE_FLASH_M25P16)
+#if defined(USE_FLASH_W25M02G)
+#define USE_FLASH_W25N01G
+#define USE_FLASH_W25M
+#endif
+
+#if defined(USE_FLASH_M25P16) || defined(USE_FLASH_W25N01G)
 #define USE_FLASH_CHIP
 #endif
 
@@ -216,9 +229,13 @@
 
 #ifdef USE_UNIFIED_TARGET
 #define USE_CONFIGURATION_STATE
+#endif
 
-// Setup crystal frequency for backward compatibility
-// Should be set to zero for generic targets and set with CLI variable set system_hse_value.
+// Setup crystal frequency on F4 for backward compatibility
+// Should be set to zero for generic targets to ensure USB is working
+// when unconfigured for targets with non-standard crystal.
+// Can be set at runtime with with CLI parameter 'system_hse_value'.
+#if !defined(STM32F4) || defined(USE_UNIFIED_TARGET)
 #define SYSTEM_HSE_VALUE 0
 #else
 #ifdef TARGET_XTAL_MHZ
@@ -226,13 +243,17 @@
 #else
 #define SYSTEM_HSE_VALUE (HSE_VALUE/1000000U)
 #endif
-#endif // USE_UNIFIED_TARGET
+#endif // !STM32F4 || USE_UNIFIED_TARGET
 
 // Number of pins that needs pre-init
 #ifdef USE_SPI
 #ifndef SPI_PREINIT_COUNT
 #define SPI_PREINIT_COUNT 16 // 2 x 8 (GYROx2, BARO, MAG, MAX, FLASHx2, RX)
 #endif
+#endif
+
+#ifndef USE_BLACKBOX
+#undef USE_USB_MSC
 #endif
 
 #if (!defined(USE_FLASHFS) || !defined(USE_RTC_TIME) || !defined(USE_USB_MSC))
@@ -308,7 +329,26 @@
 #undef USE_RANGEFINDER_TF
 #endif
 
+#ifndef USE_GPS_RESCUE
+#undef USE_CMS_GPS_RESCUE_MENU
+#endif
+
 // TODO: Remove this once HAL support is fixed for ESCSERIAL
 #ifdef STM32F7
 #undef USE_ESCSERIAL
+#endif
+
+#if defined(EEPROM_IN_RAM) || defined(EEPROM_IN_FILE) || defined(EEPROM_IN_EXTERNAL_FLASH) || defined(EEPROM_IN_SDCARD)
+#ifndef EEPROM_SIZE
+#define EEPROM_SIZE     4096
+#endif
+extern uint8_t eepromData[EEPROM_SIZE];
+#define __config_start (*eepromData)
+#define __config_end (*ARRAYEND(eepromData))
+#else
+#ifndef EEPROM_IN_FLASH
+#define EEPROM_IN_FLASH
+#endif
+extern uint8_t __config_start;   // configured via linker script when building binaries.
+extern uint8_t __config_end;
 #endif

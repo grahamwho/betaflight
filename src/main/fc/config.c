@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
+#include <common/printf.h>
 
 #include "platform.h"
 
@@ -40,36 +41,39 @@
 #include "fc/rc.h"
 #include "fc/rc_adjustments.h"
 #include "fc/rc_controls.h"
+#include "fc/runtime_config.h"
 
 #include "flight/failsafe.h"
 #include "flight/imu.h"
 #include "flight/mixer.h"
 #include "flight/pid.h"
+#include "flight/rpm_filter.h"
 #include "flight/servos.h"
 
 #include "io/beeper.h"
+#include "io/gps.h"
 #include "io/ledstrip.h"
 #include "io/serial.h"
-#include "io/gps.h"
 
 #include "osd/osd.h"
 
 #include "pg/beeper.h"
 #include "pg/beeper_dev.h"
-#include "pg/rx.h"
 #include "pg/pg.h"
 #include "pg/pg_ids.h"
+#include "pg/rx.h"
 
 #include "rx/rx.h"
+
+#include "scheduler/scheduler.h"
 
 #include "sensors/acceleration.h"
 #include "sensors/battery.h"
 #include "sensors/gyro.h"
-#include "sensors/rpm_filter.h"
-
-#include "scheduler/scheduler.h"
 
 static bool configIsDirty; /* someone indicated that the config is modified and it is not yet saved */
+
+static bool rebootRequired = false;  // set if a config change requires a reboot to take effect
 
 pidProfile_t *currentPidProfile;
 
@@ -138,7 +142,7 @@ static void activateConfig(void)
 
     initRcProcessing();
 
-    resetAdjustmentStates();
+    activeAdjustmentRangeReset();
 
     pidInit(currentPidProfile);
 
@@ -213,6 +217,13 @@ static void validateAndFixConfig(void)
 
         if (pidProfilesMutable(i)->auto_profile_cell_count > MAX_AUTO_DETECT_CELL_COUNT || pidProfilesMutable(i)->auto_profile_cell_count < AUTO_PROFILE_CELL_COUNT_CHANGE) {
             pidProfilesMutable(i)->auto_profile_cell_count = AUTO_PROFILE_CELL_COUNT_STAY;
+        }
+
+        // If the d_min value for any axis is >= the D gain then reset d_min to 0 for consistent Configurator behavior
+        for (unsigned axis = 0; axis <= FD_YAW; axis++) {
+            if (pidProfilesMutable(i)->d_min[axis] >= pidProfilesMutable(i)->pid[axis].D) {
+                pidProfilesMutable(i)->d_min[axis] = 0;
+            }
         }
     }
 
@@ -419,9 +430,11 @@ static void validateAndFixConfig(void)
 #endif
 
 #if defined(USE_BEEPER)
+#ifdef USE_TIMER
     if (beeperDevConfig()->frequency && !timerGetByTag(beeperDevConfig()->ioTag)) {
         beeperDevConfigMutable()->frequency = 0;
     }
+#endif
 
     if (beeperConfig()->beeper_off_flags & ~BEEPER_ALLOWED_MODES) {
         beeperConfigMutable()->beeper_off_flags = 0;
@@ -731,4 +744,15 @@ bool isSystemConfigured(void)
 #else
     return true;
 #endif
+}
+
+void setRebootRequired(void)
+{
+    rebootRequired = true;
+    setArmingDisabled(ARMING_DISABLED_REBOOT_REQUIRED);
+}
+
+bool getRebootRequired(void)
+{
+    return rebootRequired;
 }

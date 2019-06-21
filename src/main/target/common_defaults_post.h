@@ -240,6 +240,25 @@
 #define SPI3_MISO_PIN   PB4
 #define SPI3_MOSI_PIN   PB5
 #endif
+
+#ifndef SPI4_SCK_PIN
+#define SPI4_SCK_PIN    NONE
+#define SPI4_MISO_PIN   NONE
+#define SPI4_MOSI_PIN   NONE
+#endif
+
+#ifndef SPI5_SCK_PIN
+#define SPI5_SCK_PIN    NONE
+#define SPI5_MISO_PIN   NONE
+#define SPI5_MOSI_PIN   NONE
+#endif
+
+#ifndef SPI6_SCK_PIN
+#define SPI6_SCK_PIN    NONE
+#define SPI6_MISO_PIN   NONE
+#define SPI6_MOSI_PIN   NONE
+#endif
+
 #endif
 
 // Extracted from rx/rx.c and rx/rx.h
@@ -428,6 +447,9 @@
 #ifndef BARO_I2C_INSTANCE
 #define BARO_I2C_INSTANCE       I2C_DEVICE
 #endif
+#ifndef BARO_XCLR_PIN
+#define BARO_XCLR_PIN           NONE
+#endif
 #endif
 
 #ifdef USE_ADC
@@ -555,4 +577,24 @@
 #ifndef UART8_RX_DMA_OPT
 #define UART8_RX_DMA_OPT (-1)
 #endif
+#endif
+
+#ifndef RTC6705_CS_PIN
+#define RTC6705_CS_PIN NONE
+#endif
+
+#ifndef RTC6705_POWER_PIN
+#define RTC6705_POWER_PIN NONE
+#endif
+
+#ifndef RTC6705_SPICLK_PIN
+#define RTC6705_SPICLK_PIN NONE
+#endif
+
+#ifndef RTC6705_SPI_MOSI_PIN
+#define RTC6705_SPI_MOSI_PIN NONE
+#endif
+
+#ifndef RTC6705_SPI_INSTANCE
+#define RTC6705_SPI_INSTANCE NULL
 #endif

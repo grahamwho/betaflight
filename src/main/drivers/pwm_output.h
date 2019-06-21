@@ -122,32 +122,24 @@ typedef enum {
 #define DSHOT_DMA_BUFFER_SIZE   18 /* resolution + frame reset (2us) */
 #define PROSHOT_DMA_BUFFER_SIZE 6  /* resolution + frame reset (2us) */
 
-#ifdef USE_DSHOT_TELEMETRY
-#ifdef USE_DSHOT_TELEMETRY_STATS
-#define DSHOT_TELEMETRY_QUALITY_WINDOW 1       // capture a rolling 1 second of packet stats
-#define DSHOT_TELEMETRY_QUALITY_BUCKET_MS 100  // determines the granularity of the stats and the overall number of rolling buckets
-#define DSHOT_TELEMETRY_QUALITY_BUCKET_COUNT (DSHOT_TELEMETRY_QUALITY_WINDOW * 1000 / DSHOT_TELEMETRY_QUALITY_BUCKET_MS)
-
-typedef struct dshotTelemetryQuality_s {
-    uint32_t packetCountSum;
-    uint32_t invalidCountSum;
-    uint32_t packetCountArray[DSHOT_TELEMETRY_QUALITY_BUCKET_COUNT];
-    uint32_t invalidCountArray[DSHOT_TELEMETRY_QUALITY_BUCKET_COUNT];
-    uint8_t lastBucketIndex;
-}  dshotTelemetryQuality_t;
-#endif // USE_DSHOT_TELEMETRY_STATS
-#endif // USE_DSHOT_TELEMETRY
-
 typedef struct {
     TIM_TypeDef *timer;
 #if defined(USE_DSHOT) && defined(USE_DSHOT_DMAR)
+#if defined(STM32F7) || defined(STM32H7)
+    TIM_HandleTypeDef timHandle;
+    DMA_HandleTypeDef hdma_tim;
+#endif
 #ifdef STM32F3
     DMA_Channel_TypeDef *dmaBurstRef;
 #else
     DMA_Stream_TypeDef *dmaBurstRef;
 #endif
     uint16_t dmaBurstLength;
+#ifdef STM32H7
+    uint32_t *dmaBurstBuffer;
+#else
     uint32_t dmaBurstBuffer[DSHOT_DMA_BUFFER_SIZE * 4];
+#endif
     timeUs_t inputDirectionStampUs;
 #endif
     uint16_t timerDmaSources;
@@ -159,7 +151,12 @@ typedef struct {
     uint16_t value;
 #ifdef USE_DSHOT
     uint16_t timerDmaSource;
+    uint8_t timerDmaIndex;
     bool configured;
+#ifdef STM32H7
+    TIM_HandleTypeDef TimHandle;
+    DMA_HandleTypeDef hdma_tim;
+#endif
     uint8_t output;
     uint8_t index;
 #ifdef USE_DSHOT_TELEMETRY
@@ -169,9 +166,6 @@ typedef struct {
     uint16_t dshotTelemetryValue;
     timeDelta_t dshotTelemetryDeadtimeUs;
     bool dshotTelemetryActive;
-#ifdef USE_DSHOT_TELEMETRY_STATS
-    dshotTelemetryQuality_t dshotTelemetryQuality;
-#endif
 #ifdef USE_HAL_DRIVER
     LL_TIM_OC_InitTypeDef ocInitStruct;
     LL_TIM_IC_InitTypeDef icInitStruct;
@@ -197,6 +191,8 @@ typedef struct {
 #else
 #if defined(STM32F3) || defined(STM32F4) || defined(STM32F7)
     uint32_t dmaBuffer[DSHOT_DMA_BUFFER_SIZE];
+#elif defined(STM32H7)
+    uint32_t *dmaBuffer;
 #else
     uint8_t dmaBuffer[DSHOT_DMA_BUFFER_SIZE];
 #endif
@@ -260,6 +256,13 @@ bool isMotorProtocolDshot(void);
 typedef uint8_t loadDmaBufferFn(uint32_t *dmaBuffer, int stride, uint16_t packet);  // function pointer used to encode a digital motor value into the DMA buffer representation
 
 uint16_t prepareDshotPacket(motorDmaOutput_t *const motor);
+
+#ifdef STM32H7
+extern DMA_RAM uint32_t dshotDmaBuffer[MAX_SUPPORTED_MOTORS][DSHOT_DMA_BUFFER_SIZE];
+#ifdef USE_DSHOT_DMAR
+extern DMA_RAM uint32_t dshotBurstDmaBuffer[MAX_DMA_TIMERS][DSHOT_DMA_BUFFER_SIZE * 4];
+#endif
+#endif
 
 extern loadDmaBufferFn *loadDmaBuffer;
 

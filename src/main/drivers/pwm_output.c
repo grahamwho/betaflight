@@ -24,6 +24,9 @@
 #include <math.h>
 
 #include "platform.h"
+
+#ifdef USE_PWM_OUTPUT
+
 #include "drivers/time.h"
 
 #include "drivers/io.h"
@@ -39,6 +42,13 @@ static FAST_RAM_ZERO_INIT pwmStartWriteFn *pwmStartWrite = NULL;
 #endif
 
 #ifdef USE_DSHOT
+#ifdef STM32H7
+// XXX dshotDmaBuffer can be embedded inside dshotBurstDmaBuffer
+DMA_RAM uint32_t dshotDmaBuffer[MAX_SUPPORTED_MOTORS][DSHOT_DMA_BUFFER_SIZE];
+#ifdef USE_DSHOT_DMAR
+DMA_RAM uint32_t dshotBurstDmaBuffer[MAX_DMA_TIMERS][DSHOT_DMA_BUFFER_SIZE * 4];
+#endif
+#endif
 FAST_RAM_ZERO_INIT loadDmaBufferFn *loadDmaBuffer;
 #define DSHOT_INITIAL_DELAY_US 10000
 #define DSHOT_COMMAND_DELAY_US 1000
@@ -673,13 +683,18 @@ FAST_CODE uint16_t prepareDshotPacket(motorDmaOutput_t *const motor)
         csum ^=  csum_data;   // xor data by nibbles
         csum_data >>= 4;
     }
-    csum &= 0xf;
     // append checksum
+#ifdef USE_DSHOT_TELEMETRY
+    if (useDshotTelemetry) {
+        csum = ~csum;
+    }
+#endif
+    csum &= 0xf;
     packet = (packet << 4) | csum;
 
     return packet;
 }
-#endif
+#endif // USE_DSHOT
 
 #ifdef USE_SERVOS
 void pwmWriteServo(uint8_t index, float value)
@@ -720,7 +735,7 @@ void servoDevInit(const servoDevConfig_t *servoConfig)
     }
 }
 
-#endif
+#endif // USE_SERVOS
 
 #ifdef USE_BEEPER
 void pwmWriteBeeper(bool onoffBeep)
@@ -763,4 +778,5 @@ void beeperPwmInit(const ioTag_t tag, uint16_t frequency)
         beeperPwm.enabled = false;
     }
 }
+#endif // USE_BEEPER
 #endif

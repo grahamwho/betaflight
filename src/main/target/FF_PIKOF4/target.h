@@ -75,8 +75,6 @@
 #define USE_MAX7456
 #define MAX7456_SPI_INSTANCE    SPI1
 #define MAX7456_SPI_CS_PIN      PA4
-#define MAX7456_SPI_CLK         (SPI_CLOCK_STANDARD) // 10MHz
-#define MAX7456_RESTORE_CLK     (SPI_CLOCK_FAST)
 /*---------------------------------*/
 #else
 /*------------FLASH----------------*/
@@ -172,7 +170,7 @@
 /*--------------TIMERS-------------*/
 #if defined(FF_PIKOF4OSD)
 #define USABLE_TIMER_CHANNEL_COUNT  7
-#define USED_TIMERS             ( TIM_N(1) | TIM_N(3) | TIM_N(5) | TIM_N(8) )
+#define USED_TIMERS             ( TIM_N(1) | TIM_N(2) | TIM_N(3) | TIM_N(4) | TIM_N(8) )
 #else
 #define USABLE_TIMER_CHANNEL_COUNT  5
 #define USED_TIMERS             ( TIM_N(2) | TIM_N(3) | TIM_N(4) )

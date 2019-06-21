@@ -97,7 +97,18 @@
 //#define USE_SPI_TRANSACTION
 #endif // STM32F7
 
-#if defined(STM32F4) || defined(STM32F7)
+#ifdef STM32H7
+#define USE_ITCM_RAM
+#define USE_FAST_RAM
+#define USE_DSHOT
+#define USE_GYRO_DATA_ANALYSE
+#define USE_ADC_INTERNAL
+#define USE_USB_CDC_HID
+#define USE_DMA_SPEC
+#define USE_TIMER_MGMT
+#endif
+
+#if defined(STM32F4) || defined(STM32F7) || defined(STM32H7)
 #define TASK_GYROPID_DESIRED_PERIOD     125 // 125us = 8kHz
 #define SCHEDULER_DELAY_LIMIT           10
 #else
@@ -127,7 +138,7 @@
 #define FAST_RAM
 #endif // USE_FAST_RAM
 
-#ifdef STM32F4
+#if defined(STM32F4) || defined (STM32H7)
 // Data in RAM which is guaranteed to not be reset on hot reboot
 #define PERSISTENT                  __attribute__ ((section(".persistent_data"), aligned(4)))
 #endif
@@ -138,7 +149,17 @@
 #define SRAM2
 #endif
 
+#ifdef USE_DMA_RAM
+#define DMA_RAM __attribute__((section(".DMA_RAM")))
+#else
+#define DMA_RAM
+#endif
+
 #define USE_BRUSHED_ESC_AUTODETECT  // Detect if brushed motors are connected and set defaults appropriately to avoid motors spinning on boot
+
+#define USE_PWM_OUTPUT
+#define USE_DMA
+#define USE_TIMER
 
 #define USE_CLI
 #define USE_SERIAL_PASSTHROUGH
@@ -263,6 +284,8 @@
 #define USE_RX_MSP
 #define USE_ESC_SENSOR_INFO
 #define USE_CRSF_CMS_TELEMETRY
+#define USE_CRSF_LINK_STATISTICS
+#define USE_RX_RSSI_DBM
 #endif
 
 #endif // FLASH_SIZE > 128
@@ -303,4 +326,5 @@
 #define USE_TELEMETRY_SENSORS_DISABLED_DETAILS
 #define USE_VTX_TABLE
 #define USE_PERSISTENT_STATS
+#define USE_PROFILE_NAMES
 #endif

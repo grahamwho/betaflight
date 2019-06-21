@@ -44,7 +44,6 @@
 //GYRO & ACC--------------------------------
 #define USE_ACC
 #define USE_GYRO
-#define USE_MULTI_GYRO
 // ICM-20608-G
 #define USE_ACC_SPI_MPU6500
 #define USE_GYRO_SPI_MPU6500
@@ -163,8 +162,6 @@
 #define USE_MAX7456
 #define MAX7456_SPI_INSTANCE    SPI2
 #define MAX7456_SPI_CS_PIN      SPI2_NSS_PIN
-#define MAX7456_SPI_CLK         (SPI_CLOCK_STANDARD) // 10MHz
-#define MAX7456_RESTORE_CLK     (SPI_CLOCK_FAST)
 
 #ifdef FPVM_BETAFLIGHTF7
 //FLASH--------------------------------------

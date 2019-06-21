@@ -69,7 +69,7 @@ void vtxTableInit(void)
     }
     vtxTableChannelNames[0] = "-";
 
-    for (int level = 0; level < config->powerLevels; level++) {
+    for (int level = 0; level < VTX_TABLE_MAX_POWER_LEVELS; level++) {
         vtxTablePowerValues[level] = config->powerValues[level];
         vtxTablePowerLabels[level + 1] = config->powerLabels[level];
     }
@@ -120,14 +120,14 @@ void vtxTableConfigClearBand(vtxTableConfig_t *config, int band)
     config->bandLetters[band] = '1' + band;
 }
 
-void vtxTableConfigClearPowerValues(vtxTableConfig_t *config, int start) 
+void vtxTableConfigClearPowerValues(vtxTableConfig_t *config, int start)
 {
     for (int i = start; i < VTX_TABLE_MAX_POWER_LEVELS; i++) {
         config->powerValues[i] = 0;
     }
 }
 
-void vtxTableConfigClearPowerLabels(vtxTableConfig_t *config, int start) 
+void vtxTableConfigClearPowerLabels(vtxTableConfig_t *config, int start)
 {
     for (int i = start; i < VTX_TABLE_MAX_POWER_LEVELS; i++) {
         char tempbuf[4];

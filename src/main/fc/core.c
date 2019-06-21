@@ -31,32 +31,20 @@
 
 #include "cli/cli.h"
 
+#include "cms/cms.h"
+
 #include "common/axis.h"
 #include "common/filter.h"
 #include "common/maths.h"
 #include "common/utils.h"
 
 #include "config/feature.h"
-#include "pg/pg.h"
-#include "pg/pg_ids.h"
-#include "pg/rx.h"
 
 #include "drivers/light_led.h"
 #include "drivers/sound_beeper.h"
 #include "drivers/system.h"
 #include "drivers/time.h"
 #include "drivers/transponder_ir.h"
-
-#include "sensors/acceleration.h"
-#include "sensors/barometer.h"
-#include "sensors/battery.h"
-#include "sensors/boardalignment.h"
-#include "sensors/gyro.h"
-#include "sensors/sensors.h"
-#if defined(USE_GYRO_DATA_ANALYSE)
-#include "sensors/gyroanalyse.h"
-#endif
-#include "sensors/rpm_filter.h"
 
 #include "fc/config.h"
 #include "fc/controlrate_profile.h"
@@ -67,37 +55,50 @@
 #include "fc/runtime_config.h"
 #include "fc/stats.h"
 
-#include "msp/msp_serial.h"
+#include "flight/failsafe.h"
+#include "flight/gps_rescue.h"
+#if defined(USE_GYRO_DATA_ANALYSE)
+#include "flight/gyroanalyse.h"
+#endif
+#include "flight/imu.h"
+#include "flight/mixer.h"
+#include "flight/pid.h"
+#include "flight/position.h"
+#include "flight/rpm_filter.h"
+#include "flight/servos.h"
 
 #include "io/beeper.h"
 #include "io/gps.h"
 #include "io/motors.h"
 #include "io/pidaudio.h"
-#include "io/servos.h"
 #include "io/serial.h"
+#include "io/servos.h"
 #include "io/statusindicator.h"
 #include "io/transponder_ir.h"
 #include "io/vtx_control.h"
 #include "io/vtx_rtc6705.h"
 
+#include "msp/msp_serial.h"
+
 #include "osd/osd.h"
+
+#include "pg/pg.h"
+#include "pg/pg_ids.h"
+#include "pg/rx.h"
 
 #include "rx/rx.h"
 
 #include "scheduler/scheduler.h"
 
+#include "sensors/acceleration.h"
+#include "sensors/barometer.h"
+#include "sensors/battery.h"
+#include "sensors/boardalignment.h"
+#include "sensors/gyro.h"
+#include "sensors/sensors.h"
+
 #include "telemetry/telemetry.h"
 
-#include "flight/position.h"
-#include "flight/failsafe.h"
-#include "flight/imu.h"
-#include "flight/mixer.h"
-#include "flight/pid.h"
-#include "flight/servos.h"
-#include "flight/gps_rescue.h"
-
-
-// June 2013     V2.2-dev
 
 enum {
     ALIGN_GYRO = 0,
@@ -413,14 +414,6 @@ void tryArm(void)
             }
             return;
         }
-
-#ifdef USE_DSHOT_TELEMETRY
-        if (isMotorProtocolDshot()) {
-            pwmWriteDshotCommand(
-                255, getMotorCount(), motorConfig()->dev.useDshotTelemetry ?
-                DSHOT_CMD_SIGNAL_LINE_CONTINUOUS_ERPM_TELEMETRY : DSHOT_CMD_SIGNAL_LINE_TELEMETRY_DISABLE, false);
-        }
-#endif
 
         if (isMotorProtocolDshot() && isModeActivationConditionPresent(BOXFLIPOVERAFTERCRASH)) {
             if (!(IS_RC_MODE_ACTIVE(BOXFLIPOVERAFTERCRASH) || (tryingToArm == ARMING_DELAYED_CRASHFLIP))) {
@@ -844,7 +837,13 @@ bool processRx(timeUs_t currentTimeUs)
         disarmAt = currentTimeUs + autoDisarmDelayUs;  // extend auto-disarm timer
     }
 
-    processRcStickPositions();
+    if (!IS_RC_MODE_ACTIVE(BOXPARALYZE)
+#ifdef USE_CMS
+        && !cmsInMenu
+#endif
+        ) {
+        processRcStickPositions();
+    }
 
     if (featureIsEnabled(FEATURE_INFLIGHT_ACC_CAL)) {
         updateInflightCalibrationState();
@@ -859,7 +858,7 @@ bool processRx(timeUs_t currentTimeUs)
     }
 #endif
 
-    if (!cliMode) {
+    if (!cliMode && !IS_RC_MODE_ACTIVE(BOXPARALYZE)) {
         processRcAdjustments(currentControlRateProfile);
     }
 
@@ -984,11 +983,6 @@ bool processRx(timeUs_t currentTimeUs)
 #endif
 
     pidSetAntiGravityState(IS_RC_MODE_ACTIVE(BOXANTIGRAVITY) || featureIsEnabled(FEATURE_ANTI_GRAVITY));
-
-#ifdef USE_PERSISTENT_STATS
-    /* allow the stats collector to do periodic tasks */
-    statsOnLoop();
-#endif
 
     return true;
 }

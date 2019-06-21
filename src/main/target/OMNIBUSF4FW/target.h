@@ -61,8 +61,6 @@
 #define USE_GYRO_SPI_MPU6000
 #define USE_GYRO_SPI_MPU6500
 
-#define USE_MULTI_GYRO
-
 #if defined(OMNIBUSF4V6)
 #define GYRO_1_CS_PIN           PA4   // Onboard IMU  
 #define GYRO_1_SPI_INSTANCE     SPI1
@@ -108,8 +106,6 @@
 #define USE_MAX7456
 #define MAX7456_SPI_INSTANCE    SPI3
 #define MAX7456_SPI_CS_PIN      PA15
-#define MAX7456_SPI_CLK         (SPI_CLOCK_STANDARD) // 10MHz
-#define MAX7456_RESTORE_CLK     (SPI_CLOCK_FAST)
 
 #define USE_FLASHFS
 #define USE_FLASH_M25P16
